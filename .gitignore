@@ -21,6 +21,9 @@ storage/sessions/
 
 # 配置文件（包含账号密码）
 config/sites.yaml
+config/*.yaml
+modules/**/config.yaml
+!modules/custom/template/*.example
 
 # IDE
 .vscode/

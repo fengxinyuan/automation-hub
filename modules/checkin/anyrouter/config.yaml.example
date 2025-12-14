@@ -1,5 +1,5 @@
-# AnyRouter 自动签到配置
-# 这是一个独立的配置文件，与 linuxdo 功能完全隔离
+# AnyRouter 自动签到配置示例
+# 复制此文件为 config.yaml 并填入你的真实账号信息
 
 site:
   name: anyrouter
@@ -7,16 +7,12 @@ site:
 
   # 账号列表
   accounts:
-    - username: fengxy@nwafu.edu.cn
-      password: 123456ab
-      enabled: true
-
-    - username: fengxy@nwsuaf.edu.cn
-      password: 123456ab
+    - username: your-email@example.com
+      password: your-password
       enabled: true
 
     # 多账号示例：
-    # - username: user3@example.com
+    # - username: user2@example.com
     #   password: another_password
     #   enabled: false
 

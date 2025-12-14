@@ -1,0 +1,142 @@
+"""模块名称 - 适配器模板"""
+import sys
+from pathlib import Path
+
+# 添加项目根目录到路径
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.base_adapter import BaseAdapter, TaskResult
+import asyncio
+
+
+class ModuleNameAdapter(BaseAdapter):
+    """模块名称适配器
+
+    请根据实际网站修改此类：
+    1. 修改类名
+    2. 实现 is_logged_in 方法
+    3. 实现 login 方法
+    4. 实现 checkin 方法
+    """
+
+    # 页面加载超时配置（毫秒）
+    PAGE_LOAD_TIMEOUT = 30000
+    ELEMENT_WAIT_TIMEOUT = 10000
+
+    def __init__(self, site_url: str, username: str, password: str, logger=None, **kwargs):
+        super().__init__(
+            site_name="module_name",  # 修改为你的模块名
+            site_url=site_url,
+            username=username,
+            password=password,
+            logger=logger
+        )
+        # 保存额外参数
+        self.extra_params = kwargs
+
+    async def is_logged_in(self) -> bool:
+        """
+        检查是否已登录
+
+        Returns:
+            是否已登录
+        """
+        try:
+            # TODO: 实现登录状态检查逻辑
+            # 例如：访问首页，检查是否有用户信息元素
+            await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+
+            # 检查登录状态的指示器（根据实际网站修改）
+            try:
+                element = await self.page.wait_for_selector(
+                    '.user-info',  # 修改为实际的用户信息元素选择器
+                    timeout=3000,
+                    state='visible'
+                )
+                return element is not None
+            except:
+                return False
+
+        except Exception as e:
+            self.logger.error(f"检查登录状态失败: {str(e)}")
+            return False
+
+    async def login(self) -> bool:
+        """
+        执行登录操作
+
+        Returns:
+            是否登录成功
+        """
+        try:
+            self.logger.info("开始登录...")
+
+            # TODO: 实现登录逻辑
+            # 1. 访问登录页面
+            await self.page.goto(f"{self.site_url}/login", wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await asyncio.sleep(2)
+
+            # 2. 填写用户名（根据实际网站修改选择器）
+            await self.page.fill('input[name="username"]', self.username)
+
+            # 3. 填写密码
+            await self.page.fill('input[name="password"]', self.password)
+
+            # 4. 点击登录按钮
+            await self.page.click('button[type="submit"]')
+
+            # 5. 等待登录完成
+            await asyncio.sleep(3)
+
+            # 6. 检查是否登录成功
+            is_success = await self.is_logged_in()
+
+            if is_success:
+                self.logger.info("登录成功")
+            else:
+                self.logger.error("登录可能失败")
+
+            return is_success
+
+        except Exception as e:
+            self.logger.error(f"登录过程出错: {str(e)}")
+            await self.take_screenshot("login_exception")
+            return False
+
+    async def checkin(self) -> TaskResult:
+        """
+        执行签到/主要任务
+
+        Returns:
+            任务结果
+        """
+        try:
+            self.logger.info("开始执行任务...")
+
+            # TODO: 实现签到/任务逻辑
+            # 1. 访问签到页面
+            await self.page.goto(f"{self.site_url}/checkin", wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await asyncio.sleep(2)
+
+            # 2. 点击签到按钮（根据实际网站修改选择器）
+            await self.page.click('.checkin-button')
+            await asyncio.sleep(2)
+
+            # 3. 获取签到结果
+            # 这里是示例，实际需要根据网站返回的信息来判断
+            result_message = "任务执行成功"
+
+            return TaskResult(
+                success=True,
+                message=result_message,
+                details={}
+            )
+
+        except Exception as e:
+            self.logger.error(f"执行任务失败: {str(e)}")
+            await self.take_screenshot("checkin_exception")
+            return TaskResult(
+                success=False,
+                message=f"任务执行失败: {str(e)}"
+            )

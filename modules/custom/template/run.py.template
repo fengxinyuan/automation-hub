@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+"""
+模块名称 - 独立运行脚本模板
+"""
+import asyncio
+import argparse
+import sys
+import os
+import yaml
+from pathlib import Path
+from typing import List, Dict, Any
+from dotenv import load_dotenv
+
+# 添加项目根目录到路径
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from core.browser_manager import BrowserManager
+from core.logger import setup_logger
+from core.notifiers.email import EmailNotifier
+from modules.module_type.module_name.adapter import ModuleNameAdapter  # 修改导入路径
+
+
+def load_config(config_file: str) -> Dict[str, Any]:
+    """加载配置文件"""
+    env_file = PROJECT_ROOT / '.env'
+    if env_file.exists():
+        load_dotenv(env_file)
+
+    config_path = Path(config_file)
+    if not config_path.is_absolute():
+        config_path = Path(__file__).parent / config_file
+
+    if not config_path.exists():
+        raise FileNotFoundError(f"配置文件不存在: {config_path}")
+
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+
+    return config
+
+
+async def run_module(
+    config_file: str = "config.yaml",
+    debug: bool = False,
+    dry_run: bool = False
+) -> Dict[str, List[Dict[str, Any]]]:
+    """运行模块"""
+    config = load_config(config_file)
+
+    log_level_str = 'DEBUG' if debug else 'INFO'
+    logger = setup_logger('module_name', level=log_level_str)  # 修改模块名
+
+    logger.info("=" * 60)
+    logger.info("模块名称 - 开始执行")  # 修改显示名称
+    logger.info("=" * 60)
+
+    if dry_run:
+        logger.info("【模拟运行模式】不会执行实际操作")
+
+    # 获取站点配置
+    site_config = config.get('site', {})
+    site_name = site_config.get('name', 'module_name')  # 修改默认名称
+    site_url = site_config.get('url')
+    accounts = site_config.get('accounts', [])
+
+    if not site_url:
+        logger.error("配置文件中未找到站点 URL")
+        return {site_name: []}
+
+    enabled_accounts = [acc for acc in accounts if acc.get('enabled', True)]
+
+    if not enabled_accounts:
+        logger.warning("没有启用的账号")
+        return {site_name: []}
+
+    logger.info(f"站点: {site_url}")
+    logger.info(f"启用账号数: {len(enabled_accounts)}")
+
+    # 初始化浏览器
+    browser_config = config.get('browser', {})
+    headless = not debug if debug else browser_config.get('headless', True)
+    browser_manager = BrowserManager(headless=headless)
+
+    results = {site_name: []}
+
+    try:
+        await browser_manager.start()
+
+        for account in enabled_accounts:
+            username = account.get('username')
+            password = account.get('password')
+
+            if not username or not password:
+                logger.warning(f"账号配置不完整，跳过: {username}")
+                continue
+
+            logger.info(f"处理账号: {username}")
+
+            if dry_run:
+                logger.info(f"[模拟] 为 {username} 执行任务")
+                results[site_name].append({
+                    'success': True,
+                    'username': username,
+                    'message': '[模拟运行] 任务成功'
+                })
+                continue
+
+            # 创建浏览器上下文
+            context = await browser_manager.create_context(site_name, username)
+
+            # 创建适配器
+            adapter = ModuleNameAdapter(  # 修改类名
+                site_url=site_url,
+                username=username,
+                password=password,
+                logger=logger
+            )
+
+            # 执行任务
+            result = await adapter.run(context)
+
+            # 保存会话
+            await browser_manager.save_context(context, site_name, username)
+            await context.close()
+
+            if result.success:
+                logger.info(f"✓ {username} - {result.message}")
+            else:
+                logger.error(f"✗ {username} - {result.message}")
+
+            results[site_name].append({
+                'success': result.success,
+                'username': username,
+                'message': result.message,
+                'details': result.details
+            })
+
+    finally:
+        await browser_manager.close()
+
+    # 统计结果
+    total = len(results[site_name])
+    success = sum(1 for r in results[site_name] if r['success'])
+    failed = total - success
+
+    logger.info("=" * 60)
+    logger.info(f"执行完成: 成功 {success}/{total}, 失败 {failed}")
+    logger.info("=" * 60)
+
+    # 发送邮件通知（可选）
+    email_config = config.get('notifications', {}).get('email', {})
+    if email_config.get('enabled'):
+        logger.info("发送邮件通知...")
+        try:
+            email_notifier = EmailNotifier(
+                smtp_server=email_config['smtp_server'],
+                smtp_port=email_config['smtp_port'],
+                username=email_config['username'],
+                password=email_config['password'],
+                use_tls=email_config.get('use_tls', True),
+                logger=logger
+            )
+            email_notifier.send_checkin_report(
+                to_addresses=email_config['to_addresses'],
+                results=results
+            )
+        except Exception as e:
+            logger.error(f"发送邮件失败: {str(e)}")
+
+    return results
+
+
+def main():
+    """主函数"""
+    parser = argparse.ArgumentParser(description='模块名称 - 自动化脚本')  # 修改描述
+    parser.add_argument(
+        '--config',
+        default='config.yaml',
+        help='配置文件路径（默认: config.yaml）'
+    )
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='调试模式（显示浏览器窗口）'
+    )
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='模拟运行（不执行实际操作）'
+    )
+
+    args = parser.parse_args()
+
+    try:
+        asyncio.run(run_module(
+            config_file=args.config,
+            debug=args.debug,
+            dry_run=args.dry_run
+        ))
+    except KeyboardInterrupt:
+        print("\n\n用户中断执行")
+    except Exception as e:
+        print(f"\n执行失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

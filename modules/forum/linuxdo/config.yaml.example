@@ -1,0 +1,80 @@
+# Linux.do 论坛自动化配置示例
+# 复制此文件为 config.yaml 并填入你的真实账号信息
+
+site:
+  name: linuxdo
+  url: https://linux.do
+
+  # 账号列表
+  accounts:
+    - username: your-email@example.com
+      password: your-password
+      enabled: true
+
+    # 多账号示例：
+    # - username: another@example.com
+    #   password: another_password
+    #   enabled: false
+
+# 内容获取配置
+content:
+  # 最新帖子数量
+  latest_topics_limit: 20
+
+  # 热门帖子数量
+  hot_topics_limit: 10
+
+  # 深度阅读数量（读取完整内容）
+  read_content_limit: 5
+
+  # AI 分析数量（调用 AI 进行深度分析）
+  ai_analysis_limit: 3
+
+# AI 配置（使用阿里云通义千问）
+ai:
+  enabled: true  # 设置为 false 禁用 AI 功能
+
+  # 阿里云 DashScope API Key
+  # 获取地址: https://dashscope.console.aliyun.com/apiKey
+  api_key: ${DASHSCOPE_API_KEY}  # 从环境变量读取，或直接填写
+
+  # API 端点（通义千问兼容 OpenAI 格式）
+  api_base: https://dashscope.aliyuncs.com/compatible-mode/v1
+
+  # 使用的模型
+  model: qwen-flash  # 通义千问闪电版，速度快、成本低
+
+  # 模型参数
+  temperature: 0.7  # 创造性（0-1，越高越有创造性）
+  max_tokens: 800   # 最大生成长度
+
+  # 用户兴趣画像（可选，用于个性化推荐）
+  user_interests:
+    - Linux 服务器管理
+    - 开源软件
+    - 云计算
+    - Docker 容器
+    - 自动化运维
+
+# 通知配置
+notifications:
+  # 日志通知
+  log:
+    enabled: true
+    level: INFO  # DEBUG, INFO, WARNING, ERROR
+
+  # 邮件通知（推荐启用以接收论坛摘要）
+  email:
+    enabled: false  # 设置为 true 以启用邮件通知
+    smtp_server: smtp.gmail.com
+    smtp_port: 587
+    use_tls: true
+    username: your-email@gmail.com
+    password: your-app-password  # Gmail 需使用应用专用密码
+    to_addresses:
+      - notify@example.com
+
+# 浏览器配置
+browser:
+  headless: true
+  timeout: 60000  # 页面加载超时时间（毫秒），论坛页面较大需要更长时间

@@ -1,0 +1,42 @@
+# 模块配置文件模板
+# 复制此文件为 config.yaml 并修改
+
+module:
+  name: module_name           # 模块名称
+  type: checkin|forum|game|custom  # 模块类型
+  description: 模块描述
+
+site:
+  url: https://example.com    # 站点 URL
+  accounts:
+    - username: your-username  # 用户名/邮箱
+      password: your-password  # 密码
+      enabled: true            # 是否启用
+
+# 浏览器配置
+browser:
+  headless: true              # 无头模式
+  timeout: 30000              # 超时时间（毫秒）
+
+# 并发配置（可选）
+concurrency:
+  max_concurrent: 2           # 最大并发数
+  delay_between_accounts:
+    min: 2                    # 最小延迟（秒）
+    max: 5                    # 最大延迟（秒）
+
+# 通知配置
+notifications:
+  log:
+    enabled: true
+    level: INFO
+
+  email:
+    enabled: false            # 邮件通知开关
+    smtp_server: smtp.gmail.com
+    smtp_port: 587
+    use_tls: true
+    username: your-email@gmail.com
+    password: your-app-password
+    to_addresses:
+      - notify@example.com
