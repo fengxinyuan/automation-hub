@@ -10,6 +10,10 @@ class AnyrouterAdapter(BaseAdapter):
     建议首次运行时使用 --debug 模式查看页面结构。
     """
 
+    # 页面加载超时配置（毫秒）
+    PAGE_LOAD_TIMEOUT = 30000
+    ELEMENT_WAIT_TIMEOUT = 10000  # 元素查找超时
+
     def __init__(self, site_url: str, username: str, password: str, logger=None):
         super().__init__(
             site_name="anyrouter",
@@ -27,15 +31,10 @@ class AnyrouterAdapter(BaseAdapter):
         """
         try:
             # 访问首页
-            await self.page.goto(self.site_url, wait_until='networkidle', timeout=30000)
+            await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
 
-            # 等待页面加载完成
-            await asyncio.sleep(2)
-
-            # 常见的登录状态检查方法：
-            # 1. 检查是否存在登出按钮或用户菜单
-            # 2. 检查 URL 是否被重定向到登录页
-            # 3. 检查是否存在特定的已登录元素
+            # 等待页面稳定（等待网络请求完成）
+            await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
 
             # 方法1: 检查 URL 是否在登录页
             current_url = self.page.url
@@ -53,7 +52,11 @@ class AnyrouterAdapter(BaseAdapter):
 
             for selector in user_indicators:
                 try:
-                    element = await self.page.query_selector(selector)
+                    element = await self.page.wait_for_selector(
+                        selector,
+                        timeout=3000,  # 每个选择器只等待3秒
+                        state='visible'
+                    )
                     if element:
                         self.logger.debug(f"找到登录状态指示器: {selector}")
                         return True
@@ -61,9 +64,16 @@ class AnyrouterAdapter(BaseAdapter):
                     continue
 
             # 方法3: 检查是否有登录按钮（如果有说明未登录）
-            login_button = await self.page.query_selector('a[href*="login"]')
-            if login_button:
-                return False
+            try:
+                login_button = await self.page.wait_for_selector(
+                    'a[href*="login"]',
+                    timeout=2000,
+                    state='visible'
+                )
+                if login_button:
+                    return False
+            except:
+                pass
 
             # 默认假设已登录（由于有会话恢复）
             self.logger.warning("无法确定登录状态，假设已登录")
@@ -82,8 +92,8 @@ class AnyrouterAdapter(BaseAdapter):
         try:
             # 先访问首页
             self.logger.info(f"访问首页: {self.site_url}")
-            await self.page.goto(self.site_url, wait_until='networkidle', timeout=30000)
-            await asyncio.sleep(2)
+            await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
 
             # 尝试关闭可能的弹窗/公告
             popup_close_selectors = [
@@ -98,11 +108,11 @@ class AnyrouterAdapter(BaseAdapter):
 
             for selector in popup_close_selectors:
                 try:
-                    element = await self.page.query_selector(selector)
+                    element = await self.page.wait_for_selector(selector, timeout=2000, state='visible')
                     if element:
                         self.logger.info(f"关闭弹窗: {selector}")
                         await element.click()
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(0.5)  # 短暂等待弹窗关闭动画
                         break
                 except:
                     continue
@@ -121,12 +131,13 @@ class AnyrouterAdapter(BaseAdapter):
             signin_clicked = False
             for selector in signin_selectors:
                 try:
-                    element = await self.page.query_selector(selector)
+                    element = await self.page.wait_for_selector(selector, timeout=3000, state='visible')
                     if element:
                         self.logger.info(f"点击登录按钮: {selector}")
                         await element.click()
                         signin_clicked = True
-                        await asyncio.sleep(3)  # 等待登录页面加载
+                        # 等待页面跳转到登录页
+                        await self.page.wait_for_load_state('domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
                         break
                 except:
                     continue
@@ -138,8 +149,8 @@ class AnyrouterAdapter(BaseAdapter):
                 for path in login_paths:
                     try:
                         login_url = f"{self.site_url}{path}"
-                        await self.page.goto(login_url, wait_until='networkidle', timeout=30000)
-                        await asyncio.sleep(2)
+                        await self.page.goto(login_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+                        await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
                         # 检查是否是404
                         page_content = await self.page.content()
                         if 'not found' not in page_content.lower():
@@ -160,11 +171,11 @@ class AnyrouterAdapter(BaseAdapter):
 
             for selector in email_login_selectors:
                 try:
-                    element = await self.page.query_selector(selector)
+                    element = await self.page.wait_for_selector(selector, timeout=2000, state='visible')
                     if element:
                         self.logger.info(f"点击邮箱登录按钮: {selector}")
                         await element.click()
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(1)  # 等待表单显示
                         break
                 except:
                     continue
@@ -183,7 +194,7 @@ class AnyrouterAdapter(BaseAdapter):
             username_filled = False
             for selector in username_selectors:
                 try:
-                    element = await self.page.query_selector(selector)
+                    element = await self.page.wait_for_selector(selector, timeout=5000, state='visible')
                     if element:
                         await element.fill(self.username)
                         self.logger.debug(f"使用选择器填写用户名: {selector}")
@@ -208,7 +219,7 @@ class AnyrouterAdapter(BaseAdapter):
             password_filled = False
             for selector in password_selectors:
                 try:
-                    element = await self.page.query_selector(selector)
+                    element = await self.page.wait_for_selector(selector, timeout=5000, state='visible')
                     if element:
                         await element.fill(self.password)
                         self.logger.debug(f"使用选择器填写密码: {selector}")
@@ -236,7 +247,7 @@ class AnyrouterAdapter(BaseAdapter):
             submit_clicked = False
             for selector in submit_selectors:
                 try:
-                    element = await self.page.query_selector(selector)
+                    element = await self.page.wait_for_selector(selector, timeout=5000, state='visible')
                     if element:
                         await element.click()
                         self.logger.debug(f"点击登录按钮: {selector}")
@@ -250,10 +261,10 @@ class AnyrouterAdapter(BaseAdapter):
                 await self.take_screenshot("login_failed_no_button")
                 return False
 
-            # 等待登录完成（等待页面跳转或特定元素出现）
+            # 等待登录完成（等待页面跳转）
             try:
-                # 等待 URL 变化或特定元素
-                await asyncio.sleep(5)
+                # 等待导航完成或特定元素出现
+                await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
                 await self.take_screenshot("after_login")
 
                 # 检查是否登录成功
@@ -286,8 +297,8 @@ class AnyrouterAdapter(BaseAdapter):
             # 访问控制台页面
             console_url = f"{self.site_url}/console"
             self.logger.info(f"访问控制台: {console_url}")
-            await self.page.goto(console_url, wait_until='networkidle', timeout=30000)
-            await asyncio.sleep(3)  # 等待页面完全加载
+            await self.page.goto(console_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
 
             await self.take_screenshot("console_page")
 
@@ -301,6 +312,8 @@ class AnyrouterAdapter(BaseAdapter):
             balance_text = None
             for selector in balance_selectors:
                 try:
+                    # 等待元素出现
+                    await self.page.wait_for_selector(selector, timeout=5000, state='visible')
                     elements = await self.page.query_selector_all(selector)
                     for element in elements:
                         text = await element.text_content()

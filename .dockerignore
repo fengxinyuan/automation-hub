@@ -1,0 +1,46 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+venv/
+env/
+ENV/
+
+# 日志和数据（运行时生成）
+logs/*.log
+logs/*.png
+storage/sessions/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# 配置文件（需要手动挂载）
+config/sites.yaml
+.env
+
+# 文档
+README.md
+*.md
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 其他
+.DS_Store
+Thumbs.db

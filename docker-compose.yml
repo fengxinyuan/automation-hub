@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  auto-checkin:
+    build: .
+    container_name: auto-checkin
+    restart: unless-stopped
+
+    # 挂载配置和数据
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./storage:/app/storage
+      - ./.env:/app/.env
+
+    # 环境变量（也可以通过 .env 文件设置）
+    environment:
+      - TZ=Asia/Shanghai
+      - HEADLESS=true
+
+    # 定时运行（需要配合 cron 或使用外部调度器）
+    # command: python3 src/main.py
+
+# 如果需要定时执行，可以使用以下配置
+# services:
+#   auto-checkin-cron:
+#     build: .
+#     container_name: auto-checkin-cron
+#     restart: unless-stopped
+#     volumes:
+#       - ./config:/app/config
+#       - ./logs:/app/logs
+#       - ./storage:/app/storage
+#       - ./.env:/app/.env
+#       - ./crontab:/etc/cron.d/auto-checkin-cron
+#     command: cron -f

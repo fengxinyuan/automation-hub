@@ -1,7 +1,10 @@
 """配置加载模块"""
 import yaml
+import os
 from pathlib import Path
 from typing import Dict, Any, List
+from dotenv import load_dotenv
+from src.config_validator import ConfigValidator
 
 
 class ConfigLoader:
@@ -17,6 +20,12 @@ class ConfigLoader:
         self.config_path = Path(config_path)
         self.config: Dict[str, Any] = {}
 
+        # 加载环境变量
+        env_file = Path(__file__).parent.parent / '.env'
+        if env_file.exists():
+            load_dotenv(env_file)
+            print(f"已加载环境变量文件: {env_file}")
+
     def load(self) -> Dict[str, Any]:
         """
         加载配置文件
@@ -27,6 +36,7 @@ class ConfigLoader:
         Raises:
             FileNotFoundError: 配置文件不存在
             yaml.YAMLError: YAML 解析错误
+            ValueError: 配置验证失败
         """
         if not self.config_path.exists():
             raise FileNotFoundError(f"配置文件不存在: {self.config_path}")
@@ -36,6 +46,10 @@ class ConfigLoader:
 
         self._validate()
         self._set_defaults()
+
+        # 验证配置完整性
+        if not ConfigValidator.validate_and_report(self.config):
+            raise ValueError("配置验证失败，请检查上述错误")
 
         return self.config
 
@@ -58,7 +72,7 @@ class ConfigLoader:
                     )
 
     def _set_defaults(self):
-        """设置默认值"""
+        """设置默认值并从环境变量覆盖"""
         # 通知默认配置
         if 'notifications' not in self.config:
             self.config['notifications'] = {}
@@ -69,17 +83,41 @@ class ConfigLoader:
         if 'log' not in notifications:
             notifications['log'] = {}
         notifications['log'].setdefault('enabled', True)
-        notifications['log'].setdefault('level', 'INFO')
+        notifications['log'].setdefault('level', os.getenv('LOG_LEVEL', 'INFO'))
 
         # 邮件默认配置
         if 'email' not in notifications:
             notifications['email'] = {}
-        notifications['email'].setdefault('enabled', False)
 
-        # 账号默认启用
-        for site_config in self.config['sites'].values():
-            for account in site_config['accounts']:
+        # 从环境变量读取邮件配置
+        email_config = notifications['email']
+        email_config.setdefault('enabled', os.getenv('EMAIL_ENABLED', 'false').lower() == 'true')
+
+        if os.getenv('EMAIL_SMTP_SERVER'):
+            email_config['smtp_server'] = os.getenv('EMAIL_SMTP_SERVER')
+        if os.getenv('EMAIL_SMTP_PORT'):
+            email_config['smtp_port'] = int(os.getenv('EMAIL_SMTP_PORT'))
+        if os.getenv('EMAIL_USERNAME'):
+            email_config['username'] = os.getenv('EMAIL_USERNAME')
+        if os.getenv('EMAIL_PASSWORD'):
+            email_config['password'] = os.getenv('EMAIL_PASSWORD')
+        if os.getenv('EMAIL_USE_TLS'):
+            email_config['use_tls'] = os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+        if os.getenv('EMAIL_TO_ADDRESSES'):
+            email_config['to_addresses'] = [
+                addr.strip() for addr in os.getenv('EMAIL_TO_ADDRESSES').split(',')
+            ]
+
+        # 账号默认启用，并从环境变量读取密码
+        for site_name, site_config in self.config['sites'].items():
+            for idx, account in enumerate(site_config['accounts']):
                 account.setdefault('enabled', True)
+
+                # 从环境变量读取密码（优先级高于配置文件）
+                env_password_key = f"SITE_{site_name.upper()}_{idx}_PASSWORD"
+                env_password = os.getenv(env_password_key)
+                if env_password:
+                    account['password'] = env_password
 
     def get_sites(self) -> Dict[str, Any]:
         """获取所有站点配置"""

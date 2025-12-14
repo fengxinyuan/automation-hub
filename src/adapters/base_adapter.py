@@ -107,7 +107,7 @@ class BaseAdapter(ABC):
 
     async def _retry_operation(self, operation, max_retries: int = 3):
         """
-        重试操作
+        重试操作（带指数退避）
 
         Args:
             operation: 要执行的异步操作
@@ -116,17 +116,36 @@ class BaseAdapter(ABC):
         Returns:
             操作结果
         """
+        last_exception = None
+
         for attempt in range(max_retries):
             try:
-                return await operation()
+                self.logger.debug(f"尝试执行操作 (第 {attempt + 1}/{max_retries} 次)")
+                result = await operation()
+                if attempt > 0:
+                    self.logger.info(f"操作在第 {attempt + 1} 次尝试后成功")
+                return result
+
             except Exception as e:
+                last_exception = e
                 self.logger.warning(
-                    f"操作失败 (尝试 {attempt + 1}/{max_retries}): {str(e)}"
+                    f"操作失败 (尝试 {attempt + 1}/{max_retries}): {type(e).__name__}: {str(e)}"
                 )
+
+                # 如果不是最后一次尝试，则等待后重试
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(2 ** attempt)  # 指数退避
-                else:
-                    raise
+                    # 指数退避：2^attempt 秒（1秒、2秒、4秒...）
+                    wait_time = 2 ** attempt
+                    self.logger.info(f"等待 {wait_time} 秒后重试...")
+                    await asyncio.sleep(wait_time)
+
+                    # 在重试前截图（用于调试）
+                    if self.page:
+                        await self.take_screenshot(f"retry_{attempt + 1}")
+
+        # 所有重试都失败
+        self.logger.error(f"操作在 {max_retries} 次尝试后仍然失败")
+        raise last_exception
 
     @abstractmethod
     async def login(self) -> bool:

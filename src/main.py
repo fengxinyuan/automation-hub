@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import sys
+import random
 from pathlib import Path
 from typing import Dict, List, Any
 
@@ -20,6 +21,49 @@ from src.adapters.anyrouter import AnyrouterAdapter
 ADAPTERS = {
     'anyrouter': AnyrouterAdapter,
 }
+
+# 并发配置
+MAX_CONCURRENT_TASKS = 2  # 最大并发任务数
+MIN_DELAY_BETWEEN_ACCOUNTS = 2  # 账号之间最小延迟（秒）
+MAX_DELAY_BETWEEN_ACCOUNTS = 5  # 账号之间最大延迟（秒）
+
+
+async def run_checkin_with_semaphore(
+    semaphore: asyncio.Semaphore,
+    site_name: str,
+    site_config: Dict[str, Any],
+    account: Dict[str, Any],
+    browser_manager: BrowserManager,
+    logger,
+    delay_before: float = 0
+) -> Dict[str, Any]:
+    """
+    带信号量控制的签到执行（限制并发数）
+
+    Args:
+        semaphore: 信号量用于控制并发数
+        site_name: 站点名称
+        site_config: 站点配置
+        account: 账号信息
+        browser_manager: 浏览器管理器
+        logger: 日志记录器
+        delay_before: 执行前延迟时间（秒）
+
+    Returns:
+        签到结果
+    """
+    # 在执行前添加随机延迟，避免被检测为爬虫
+    if delay_before > 0:
+        await asyncio.sleep(delay_before)
+
+    async with semaphore:
+        return await run_checkin(
+            site_name=site_name,
+            site_config=site_config,
+            account=account,
+            browser_manager=browser_manager,
+            logger=logger
+        )
 
 
 async def run_checkin(
@@ -181,26 +225,51 @@ async def main():
                 logger.warning(f"站点 {site_name} 没有启用的账号")
                 continue
 
-            site_results = []
+            # 创建信号量控制并发数
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS)
 
-            # 遍历账号
-            for account in accounts:
-                result = await run_checkin(
-                    site_name=site_name,
-                    site_config=site_config,
-                    account=account,
-                    browser_manager=browser_manager,
-                    logger=logger
+            # 为每个账号分配随机延迟，避免被检测
+            logger.info(f"开始处理 {len(accounts)} 个账号（最大并发: {MAX_CONCURRENT_TASKS}）")
+            tasks = []
+            for idx, account in enumerate(accounts):
+                # 为每个账号添加递增的随机延迟
+                delay = idx * random.uniform(MIN_DELAY_BETWEEN_ACCOUNTS, MAX_DELAY_BETWEEN_ACCOUNTS)
+                tasks.append(
+                    run_checkin_with_semaphore(
+                        semaphore=semaphore,
+                        site_name=site_name,
+                        site_config=site_config,
+                        account=account,
+                        browser_manager=browser_manager,
+                        logger=logger,
+                        delay_before=delay
+                    )
                 )
-                site_results.append(result)
 
-                # 输出结果
-                status = "✓" if result['success'] else "✗"
-                logger.info(
-                    f"  {status} {result['username']}: {result['message']}"
-                )
+            # 并发执行所有任务
+            site_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            all_results[site_name] = site_results
+            # 输出结果并处理异常
+            processed_results = []
+            for result in site_results:
+                # 如果任务抛出异常，记录错误
+                if isinstance(result, Exception):
+                    logger.error(f"  ✗ 任务执行异常: {type(result).__name__}: {str(result)}")
+                    processed_results.append({
+                        'site': site_name,
+                        'username': 'unknown',
+                        'success': False,
+                        'message': f"任务执行异常: {str(result)}"
+                    })
+                else:
+                    # 正常结果
+                    status = "✓" if result['success'] else "✗"
+                    logger.info(
+                        f"  {status} {result['username']}: {result['message']}"
+                    )
+                    processed_results.append(result)
+
+            all_results[site_name] = processed_results
 
     # 汇总统计
     logger.info("\n" + "=" * 60)
