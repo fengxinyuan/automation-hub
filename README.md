@@ -4,8 +4,24 @@
 
 ## 🎯 支持的站点
 
-- **anyrouter** - AnyRouter 路由器服务
-- **linuxdo** - Linux.do 论坛（支持帖子推送）
+### 两个完全独立的功能模块
+
+本项目包含两个功能模块，**配置和代码完全隔离，可独立运行或拆分为独立项目**：
+
+1. **AnyRouter 自动签到**
+   - 传统网站自动签到功能
+   - 独立配置：`config/anyrouter.yaml`
+   - 独立运行：`python3 run_anyrouter.py`
+   - 无 AI 依赖，轻量快速
+
+2. **Linux.do 论坛自动化**
+   - 论坛内容获取 + AI 智能分析
+   - 独立配置：`config/linuxdo.yaml`
+   - 独立运行：`python3 run_linuxdo.py`
+   - 使用阿里云通义千问 qwen-flash 模型
+   - 支持 AI 内容总结和智能推荐
+
+📖 **详细拆分指南**：查看 [PROJECT_SPLIT_GUIDE.md](PROJECT_SPLIT_GUIDE.md)
 
 ## ✨ 功能特性
 
@@ -145,6 +161,24 @@ SITE_ANYROUTER_0_PASSWORD=your-password-here
 ```
 
 #### 4. 运行
+
+**推荐：使用独立脚本（配置和运行完全隔离）**
+
+```bash
+# 只运行 AnyRouter 签到
+python3 run_anyrouter.py
+python3 run_anyrouter.py --config config/anyrouter.yaml
+
+# 只运行 Linux.do 论坛自动化（需配置 AI）
+python3 run_linuxdo.py
+python3 run_linuxdo.py --config config/linuxdo.yaml
+
+# 调试模式（显示浏览器窗口）
+python3 run_anyrouter.py --debug
+python3 run_linuxdo.py --debug
+```
+
+**或：使用原有主脚本**
 
 ```bash
 # 直接运行（所有启用的站点）

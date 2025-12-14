@@ -22,7 +22,46 @@ class LinuxDoAdapter(BaseAdapter):
     PAGE_LOAD_TIMEOUT = 60000
     ELEMENT_WAIT_TIMEOUT = 10000
 
-    def __init__(self, site_url: str, username: str, password: str, logger=None):
+    def __init__(
+        self,
+        site_url: str,
+        username: str,
+        password: str,
+        logger=None,
+        # 内容获取配置
+        latest_limit: int = 20,
+        hot_limit: int = 10,
+        read_limit: int = 5,
+        ai_limit: int = 3,
+        # AI 配置
+        ai_enabled: bool = True,
+        ai_api_key: Optional[str] = None,
+        ai_api_base: Optional[str] = None,
+        ai_model: str = "qwen-flash",
+        ai_temperature: float = 0.7,
+        ai_max_tokens: int = 800,
+        user_interests: Optional[List[str]] = None
+    ):
+        """
+        初始化 Linux.do 适配器
+
+        Args:
+            site_url: 站点 URL
+            username: 用户名
+            password: 密码
+            logger: 日志记录器
+            latest_limit: 获取最新帖子数量
+            hot_limit: 获取热门帖子数量
+            read_limit: 深度阅读帖子数量
+            ai_limit: AI 分析帖子数量
+            ai_enabled: 是否启用 AI 功能
+            ai_api_key: AI API 密钥
+            ai_api_base: AI API 端点
+            ai_model: AI 模型名称
+            ai_temperature: AI 温度参数
+            ai_max_tokens: AI 最大生成长度
+            user_interests: 用户兴趣列表
+        """
         super().__init__(
             site_name="linuxdo",
             site_url=site_url,
@@ -30,8 +69,32 @@ class LinuxDoAdapter(BaseAdapter):
             password=password,
             logger=logger
         )
-        # 初始化 AI 分析器
-        self.ai_analyzer = AIAnalyzer(logger=logger)
+
+        # 保存配置
+        self.latest_limit = latest_limit
+        self.hot_limit = hot_limit
+        self.read_limit = read_limit
+        self.ai_limit = ai_limit
+        self.user_interests = user_interests
+
+        # 初始化 AI 分析器（如果启用）
+        if ai_enabled:
+            # 处理环境变量
+            if ai_api_key and ai_api_key.startswith('${') and ai_api_key.endswith('}'):
+                env_var = ai_api_key[2:-1]
+                ai_api_key = os.getenv(env_var, '')
+
+            self.ai_analyzer = AIAnalyzer(
+                api_key=ai_api_key,
+                api_base=ai_api_base,
+                model=ai_model,
+                temperature=ai_temperature,
+                max_tokens=ai_max_tokens,
+                logger=logger
+            )
+        else:
+            # 创建一个禁用的 AI 分析器
+            self.ai_analyzer = AIAnalyzer(api_key=None, logger=logger)
 
     async def is_logged_in(self) -> bool:
         """
@@ -240,17 +303,17 @@ class LinuxDoAdapter(BaseAdapter):
         Linux.do 不需要签到，而是获取最新帖子和热门话题，并使用 AI 进行内容总结和推荐
         """
         try:
-            # 获取更多帖子以便 AI 分析
-            self.logger.info("获取最新帖子...")
-            latest_topics = await self.get_latest_topics(limit=20)  # 增加到20个
+            # 获取帖子（使用配置参数）
+            self.logger.info(f"获取最新帖子（{self.latest_limit} 条）...")
+            latest_topics = await self.get_latest_topics(limit=self.latest_limit)
 
-            self.logger.info("获取热门帖子...")
-            hot_topics = await self.get_hot_topics(limit=10)  # 增加到10个
+            self.logger.info(f"获取热门帖子（{self.hot_limit} 条）...")
+            hot_topics = await self.get_hot_topics(limit=self.hot_limit)
 
-            # 读取热门帖子内容（前5个）
-            self.logger.info("读取热门帖子内容...")
+            # 读取帖子内容（使用配置参数）
+            self.logger.info(f"读取热门帖子内容（{self.read_limit} 条）...")
             topics_with_content = []
-            read_count = min(5, len(hot_topics))  # 最多读取5个
+            read_count = min(self.read_limit, len(hot_topics))
 
             for i, topic in enumerate(hot_topics[:read_count], 1):
                 self.logger.info(f"正在读取第 {i}/{read_count} 个热门帖子: {topic['title'][:30]}...")
@@ -261,10 +324,10 @@ class LinuxDoAdapter(BaseAdapter):
                     topics_with_content.append(topic_with_content)
                 await asyncio.sleep(1)
 
-            # 使用 AI 进行内容分析和总结
-            self.logger.info("使用 AI 分析帖子内容...")
+            # 使用 AI 进行内容分析和总结（使用配置参数）
+            self.logger.info(f"使用 AI 分析帖子内容（{self.ai_limit} 条）...")
             ai_summaries = []
-            for topic in topics_with_content[:3]:  # 对前3个进行深度 AI 分析
+            for topic in topics_with_content[:self.ai_limit]:  # 使用配置的数量
                 content_text = topic.get('content_summary', {}).get('first_post', '')
                 if content_text and len(content_text) > 100:
                     ai_result = await self.ai_analyzer.summarize_topic(topic, content_text)
@@ -283,9 +346,16 @@ class LinuxDoAdapter(BaseAdapter):
                     seen.add(t['link'])
                     unique_topics.append(t)
 
+            # 构建用户画像（如果配置了）
+            user_profile = None
+            if self.user_interests:
+                user_profile = {
+                    'interests': self.user_interests
+                }
+
             recommended_topics = await self.ai_analyzer.analyze_interests(
                 topics=unique_topics,
-                user_profile=None  # 可以在配置中添加用户兴趣画像
+                user_profile=user_profile
             )
 
             # 生成摘要

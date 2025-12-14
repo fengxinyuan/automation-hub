@@ -1,0 +1,51 @@
+# AnyRouter 自动签到配置
+# 这是一个独立的配置文件，与 linuxdo 功能完全隔离
+
+site:
+  name: anyrouter
+  url: https://anyrouter.top
+
+  # 账号列表
+  accounts:
+    - username: fengxy@nwafu.edu.cn
+      password: 123456ab
+      enabled: true
+
+    - username: fengxy@nwsuaf.edu.cn
+      password: 123456ab
+      enabled: true
+
+    # 多账号示例：
+    # - username: user3@example.com
+    #   password: another_password
+    #   enabled: false
+
+# 通知配置
+notifications:
+  # 日志通知
+  log:
+    enabled: true
+    level: INFO  # DEBUG, INFO, WARNING, ERROR
+
+  # 邮件通知
+  email:
+    enabled: false  # 设置为 true 以启用邮件通知
+    smtp_server: smtp.gmail.com
+    smtp_port: 587
+    use_tls: true
+    username: your-email@gmail.com
+    password: your-app-password  # Gmail 需使用应用专用密码
+    to_addresses:
+      - notify@example.com
+
+# 浏览器配置
+browser:
+  headless: true
+  timeout: 30000  # 页面加载超时时间（毫秒）
+
+# 并发配置
+concurrency:
+  max_concurrent: 2
+  delay_between_accounts:
+    min: 2  # 秒
+    max: 5  # 秒

@@ -1,4 +1,4 @@
-"""AI 内容分析和总结服务"""
+"""AI 内容分析和总结服务 - 使用阿里云通义千问 qwen-flash 模型"""
 import os
 import json
 from typing import List, Dict, Any, Optional
@@ -6,33 +6,59 @@ import logging
 
 
 class AIAnalyzer:
-    """AI 内容分析器 - 支持多种 AI 服务"""
+    """
+    AI 内容分析器 - 支持阿里云通义千问和其他兼容 OpenAI API 的服务
+
+    默认使用 qwen-flash 模型，速度快、成本低
+    """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
-        model: str = "gpt-3.5-turbo",
+        model: str = "qwen-flash",
+        temperature: float = 0.7,
+        max_tokens: int = 800,
         logger: Optional[logging.Logger] = None
     ):
         """
         初始化 AI 分析器
 
         Args:
-            api_key: API 密钥（如果为空，从环境变量读取）
-            api_base: API 基础 URL（可选，用于自定义端点）
-            model: 使用的模型名称
+            api_key: API 密钥（优先从参数读取，否则从环境变量）
+            api_base: API 基础 URL（默认为阿里云通义千问）
+            model: 使用的模型名称（默认 qwen-flash）
+            temperature: 模型创造性参数（0-1）
+            max_tokens: 最大生成长度
             logger: 日志记录器
         """
-        self.api_key = api_key or os.getenv('OPENAI_API_KEY') or os.getenv('AI_API_KEY')
-        self.api_base = api_base or os.getenv('OPENAI_API_BASE') or os.getenv('AI_API_BASE')
-        self.model = model or os.getenv('AI_MODEL', 'gpt-3.5-turbo')
+        # API Key 优先级: 参数 > DASHSCOPE_API_KEY > OPENAI_API_KEY > AI_API_KEY
+        self.api_key = (
+            api_key or
+            os.getenv('DASHSCOPE_API_KEY') or
+            os.getenv('OPENAI_API_KEY') or
+            os.getenv('AI_API_KEY')
+        )
+
+        # API Base 优先级: 参数 > 环境变量 > 阿里云默认地址
+        self.api_base = (
+            api_base or
+            os.getenv('AI_API_BASE') or
+            os.getenv('OPENAI_API_BASE') or
+            'https://dashscope.aliyuncs.com/compatible-mode/v1'
+        )
+
+        self.model = model or os.getenv('AI_MODEL', 'qwen-flash')
+        self.temperature = temperature
+        self.max_tokens = max_tokens
         self.logger = logger or logging.getLogger(__name__)
 
         # 检查是否配置了 API
         self.enabled = bool(self.api_key)
         if not self.enabled:
-            self.logger.warning("未配置 AI API 密钥，将使用简单文本提取")
+            self.logger.warning("未配置 AI API 密钥，将使用简单文本提取（不使用 AI）")
+        else:
+            self.logger.info(f"AI 分析器已启用 - 模型: {self.model}")
 
     async def summarize_topic(self, topic: Dict[str, Any], content: str) -> Dict[str, Any]:
         """
@@ -53,14 +79,15 @@ class AIAnalyzer:
             return self._simple_summary(content)
 
         try:
-            # 导入 OpenAI 库
+            # 导入 OpenAI 兼容库（阿里云通义千问兼容 OpenAI 格式）
             try:
                 import openai
             except ImportError:
                 self.logger.warning("未安装 openai 库，将使用简单文本提取")
+                self.logger.info("提示：运行 'pip install openai' 安装")
                 return self._simple_summary(content)
 
-            # 配置 OpenAI
+            # 配置 API（阿里云通义千问兼容 OpenAI API 格式）
             if self.api_base:
                 openai.api_base = self.api_base
             openai.api_key = self.api_key
@@ -68,15 +95,15 @@ class AIAnalyzer:
             # 构建提示词
             prompt = self._build_summary_prompt(topic, content)
 
-            # 调用 AI 模型
+            # 调用 AI 模型（qwen-flash）
             response = await openai.ChatCompletion.acreate(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "你是一个专业的内容分析助手，擅长提炼文章要点和识别关键信息。"},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=500
+                temperature=self.temperature,
+                max_tokens=self.max_tokens
             )
 
             # 解析响应
@@ -119,14 +146,15 @@ class AIAnalyzer:
             # 构建分析提示词
             prompt = self._build_interest_prompt(topics, user_profile)
 
+            # 调用 AI 模型（qwen-flash）
             response = await openai.ChatCompletion.acreate(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "你是一个内容推荐专家，擅长分析用户兴趣并推荐相关内容。"},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.5,
-                max_tokens=800
+                temperature=0.5,  # 推荐任务使用较低温度，更稳定
+                max_tokens=self.max_tokens
             )
 
             result_text = response.choices[0].message.content.strip()
