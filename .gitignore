@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# 日志和临时文件
+logs/*.log
+logs/*.png
+*.log
+
+# 浏览器会话（包含登录信息）
+storage/sessions/
+
+# 配置文件（包含账号密码）
+config/sites.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
