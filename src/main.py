@@ -15,11 +15,13 @@ from src.browser_manager import BrowserManager
 from src.notifiers.logger import setup_logger
 from src.notifiers.email import EmailNotifier
 from src.adapters.anyrouter import AnyrouterAdapter
+from src.adapters.linuxdo import LinuxDoAdapter
 
 
 # 站点适配器映射
 ADAPTERS = {
     'anyrouter': AnyrouterAdapter,
+    'linuxdo': LinuxDoAdapter,
 }
 
 # 并发配置

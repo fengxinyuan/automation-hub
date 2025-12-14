@@ -2,17 +2,23 @@
 
 一个功能强大、易于扩展的自动登录签到系统，使用 Python + Playwright 实现浏览器自动化。
 
+## 🎯 支持的站点
+
+- **anyrouter** - AnyRouter 路由器服务
+- **linuxdo** - Linux.do 论坛（支持帖子推送）
+
 ## ✨ 功能特性
 
 - **多站点支持**: 可扩展架构，轻松添加新站点适配器
 - **多账号管理**: 通过 YAML 配置文件管理多个站点和账号
+- **论坛帖子推送**: Linux.do 支持自动获取最新帖子和热门话题（无需浏览即知论坛动态）
 - **智能并发**: 支持并发执行多账号签到，带随机延迟避免被检测
 - **会话保持**: 自动保存浏览器会话，减少登录频率
 - **智能等待**: 使用 Playwright 智能等待机制，提高执行效率
 - **反爬虫应对**: 使用真实浏览器环境，模拟人工操作
 - **环境变量**: 支持通过环境变量管理敏感信息
 - **配置验证**: 自动验证配置文件完整性和有效性
-- **通知系统**: 支持日志文件和邮件通知
+- **通知系统**: 支持日志文件和邮件通知（包含帖子摘要）
 - **错误重试**: 智能重试机制，带指数退避策略
 - **Docker 支持**: 提供 Docker 和 Docker Compose 配置，简化部署
 - **定时执行**: 配合 cron 实现每日自动签到
@@ -90,13 +96,20 @@ sites:
         password: your-password
         enabled: true
 
+  linuxdo:
+    url: https://linux.do
+    accounts:
+      - username: your-username-or-email
+        password: your-password
+        enabled: true  # 启用以获取论坛动态推送
+
 notifications:
   log:
     enabled: true
     level: INFO
 
   email:
-    enabled: false
+    enabled: true  # 建议启用，以接收帖子推送
     smtp_server: smtp.gmail.com
     smtp_port: 587
     use_tls: true
@@ -134,7 +147,7 @@ SITE_ANYROUTER_0_PASSWORD=your-password-here
 #### 4. 运行
 
 ```bash
-# 直接运行
+# 直接运行（所有启用的站点）
 python3 src/main.py
 
 # 使用启动脚本
@@ -145,12 +158,44 @@ python3 src/main.py --config config/sites.yaml
 
 # 指定站点
 python3 src/main.py --site anyrouter
+python3 src/main.py --site linuxdo  # Linux.do 论坛
 
 # 调试模式（显示浏览器窗口）
 python3 src/main.py --debug
 
 # 测试模式（不实际执行）
 python3 src/main.py --dry-run
+```
+
+### 📱 Linux.do 论坛特别说明
+
+Linux.do 论坛适配器不是传统的签到功能，而是**自动获取论坛动态并推送**：
+
+- 📰 自动获取最新帖子（默认10条）
+- 🔥 自动获取热门话题（默认5条）
+- 📧 通过邮件推送帖子摘要（包含标题、作者、分类、回复数、浏览数、链接）
+- ⚡ 无需浏览论坛即可了解最新动态
+
+**查看详细文档**: [docs/LINUXDO_GUIDE.md](docs/LINUXDO_GUIDE.md)
+
+**推荐配置**:
+```yaml
+linuxdo:
+  url: https://linux.do
+  accounts:
+    - username: your_email@example.com
+      password: your_password
+      enabled: true
+
+notifications:
+  email:
+    enabled: true  # 必须启用以接收帖子推送
+```
+
+**定时任务建议**:
+```bash
+# 每天早上 8:00 获取论坛动态
+0 8 * * * cd /root/auto-checkin && python3 src/main.py --site linuxdo >> logs/cron.log 2>&1
 ```
 
 ### 方式二：Docker 运行
@@ -423,7 +468,20 @@ ls -la config/sites.yaml .env
 
 ## 📝 更新日志
 
-### v2.0.0 (2025-12-14)
+### v2.1.0 (2024-12-14)
+
+**新功能**:
+- ✅ **添加 Linux.do 论坛支持**
+  - 自动登录 Linux.do 论坛
+  - 获取最新帖子和热门话题
+  - 通过邮件推送论坛动态摘要
+  - 无需浏览即可了解论坛最新进度
+- ✅ **增强邮件通知**
+  - 支持显示论坛帖子列表
+  - HTML 格式化帖子信息
+  - 可点击链接直接跳转
+
+### v2.0.0 (2024-12-14)
 
 **新功能**:
 - ✅ 添加并发执行支持，带随机延迟避免检测

@@ -157,8 +157,123 @@ class EmailNotifier:
                 <div class="result {status_class}">
                     <strong>{result['username']}</strong> - {status_text}<br>
                     {result['message']}
-                </div>
                 """
+
+                # 如果是 Linux.do，添加帖子摘要
+                if site_name == 'linuxdo' and result.get('details') and result['success']:
+                    details = result['details']
+
+                    # AI 推荐 - 最感兴趣的话题（优先显示）
+                    if details.get('recommended_topics'):
+                        html_body += '<h3 style="margin-top: 20px; color: #4CAF50;">🎯 AI 为你推荐 - 最可能感兴趣的话题</h3>'
+                        for topic in details['recommended_topics'][:5]:
+                            score = topic.get('relevance_score', 0)
+                            reason = topic.get('recommendation_reason', '')
+                            tags = topic.get('recommendation_tags', [])
+
+                            html_body += f"""
+                            <div style="margin: 15px 0; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                        border-radius: 8px; color: white;">
+                                <h4 style="margin: 0 0 10px 0; color: white;">
+                                    <a href="https://linux.do{topic['link']}" target="_blank"
+                                       style="color: white; text-decoration: none;">{topic['title']}</a>
+                                </h4>
+                                <div style="margin: 8px 0; font-size: 14px; opacity: 0.9;">
+                                    📊 相关度: <strong>{score}%</strong> |
+                                    👤 {topic['author']} |
+                                    📁 {topic['category']} |
+                                    💬 {topic['replies']} |
+                                    👁️ {topic['views']}
+                                </div>
+                                <div style="margin: 8px 0; padding: 10px; background: rgba(255,255,255,0.1);
+                                           border-radius: 4px; font-size: 14px;">
+                                    📝 <strong>推荐理由:</strong> {reason}
+                                </div>
+                                {f'<div style="margin: 8px 0; font-size: 13px;">🏷️ {", ".join(tags)}</div>' if tags else ''}
+                            </div>
+                            """
+
+                    # AI 深度分析
+                    if details.get('ai_summaries'):
+                        html_body += '<h3 style="margin-top: 20px;">🤖 AI 深度分析</h3>'
+                        for topic in details['ai_summaries']:
+                            ai_summary = topic.get('ai_summary', {})
+
+                            html_body += f"""
+                            <div style="margin: 15px 0; padding: 15px; background-color: #f0f8ff;
+                                        border-left: 4px solid #2196F3; border-radius: 4px;">
+                                <h4 style="margin: 0 0 10px 0;">
+                                    <a href="https://linux.do{topic['link']}" target="_blank">{topic['title']}</a>
+                                </h4>
+                                <div style="margin: 5px 0; color: #666; font-size: 13px;">
+                                    👤 {topic['author']} | 📁 {topic['category']}
+                                </div>
+                            """
+
+                            # AI 摘要
+                            if ai_summary.get('summary'):
+                                html_body += f"""
+                                <div style="margin: 10px 0; padding: 10px; background: white; border-radius: 4px;">
+                                    <strong>📝 AI 摘要:</strong><br>
+                                    <em style="color: #555;">{ai_summary['summary']}</em>
+                                </div>
+                                """
+
+                            # 关键要点
+                            if ai_summary.get('key_points'):
+                                html_body += '<div style="margin: 10px 0;"><strong>🔑 关键要点:</strong><ul style="margin: 5px 0;">'
+                                for point in ai_summary['key_points'][:3]:
+                                    html_body += f'<li style="color: #555;">{point}</li>'
+                                html_body += '</ul></div>'
+
+                            # 标签和情感
+                            if ai_summary.get('tags') or ai_summary.get('sentiment'):
+                                html_body += '<div style="margin: 10px 0; font-size: 13px;">'
+                                if ai_summary.get('tags'):
+                                    html_body += f'🏷️ {", ".join(ai_summary["tags"])} &nbsp;&nbsp;'
+                                if ai_summary.get('sentiment'):
+                                    sentiment = ai_summary['sentiment']
+                                    sentiment_emoji = {"positive": "😊", "negative": "😟", "neutral": "😐"}
+                                    html_body += f'💭 {sentiment_emoji.get(sentiment, "😐")} {sentiment}'
+                                html_body += '</div>'
+
+                            html_body += '</div>'
+
+                    # 最新帖子
+                    if details.get('latest_topics'):
+                        html_body += '<h4 style="margin-top: 20px;">📰 最新帖子</h4><ul>'
+                        for topic in details['latest_topics'][:10]:
+                            html_body += f"""
+                            <li style="margin: 8px 0;">
+                                <a href="https://linux.do{topic['link']}" target="_blank">{topic['title']}</a><br>
+                                <small style="color: #666;">
+                                    👤 {topic['author']} |
+                                    📁 {topic['category']} |
+                                    💬 {topic['replies']} |
+                                    👁️ {topic['views']}
+                                </small>
+                            </li>
+                            """
+                        html_body += '</ul>'
+
+                    # 热门话题
+                    if details.get('hot_topics'):
+                        html_body += '<h4 style="margin-top: 20px;">🔥 热门话题</h4><ul>'
+                        for topic in details['hot_topics'][:10]:
+                            html_body += f"""
+                            <li style="margin: 8px 0;">
+                                <a href="https://linux.do{topic['link']}" target="_blank">{topic['title']}</a><br>
+                                <small style="color: #666;">
+                                    👤 {topic['author']} |
+                                    📁 {topic['category']} |
+                                    💬 {topic['replies']} |
+                                    👁️ {topic['views']}
+                                </small>
+                            </li>
+                            """
+                        html_body += '</ul>'
+
+                html_body += '</div>'
 
             html_body += '</div>'
 
