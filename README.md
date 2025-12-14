@@ -98,7 +98,15 @@ python3 modules/checkin/anyrouter/run.py --dry-run
 
 ### 3. 配置说明
 
-每个模块的配置文件独立：
+每个模块的配置文件独立，使用 `.example` 模板创建：
+
+```bash
+# AnyRouter 模块
+cp modules/checkin/anyrouter/config.yaml.example modules/checkin/anyrouter/config.yaml
+
+# Linux.do 模块
+cp modules/forum/linuxdo/config.yaml.example modules/forum/linuxdo/config.yaml
+```
 
 **AnyRouter** (`modules/checkin/anyrouter/config.yaml`):
 ```yaml
