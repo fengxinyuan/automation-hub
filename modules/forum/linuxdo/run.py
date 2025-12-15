@@ -43,6 +43,90 @@ def load_config(config_file: str) -> Dict[str, Any]:
     return config
 
 
+def _save_summary_to_file(results: Dict[str, List[Dict[str, Any]]], logger):
+    """
+    保存总结到文件
+
+    Args:
+        results: 执行结果
+        logger: 日志记录器
+    """
+    try:
+        from datetime import datetime
+        import json
+
+        # 创建输出目录
+        output_dir = PROJECT_ROOT / 'storage' / 'data'
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 生成文件名
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        output_file = output_dir / f'linuxdo_summary_{timestamp}.txt'
+        json_file = output_dir / f'linuxdo_summary_{timestamp}.json'
+
+        # 保存 JSON（完整数据）
+        with open(json_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+
+        # 生成可读的文本总结
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write(f"Linux.do 论坛动态总结\n")
+            f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write("=" * 80 + "\n\n")
+
+            for site_name, site_results in results.items():
+                for result in site_results:
+                    if not result.get('success') or 'details' not in result:
+                        continue
+
+                    details = result['details']
+                    f.write(f"账号: {result['username']}\n")
+                    f.write("-" * 80 + "\n\n")
+
+                    # 输出推荐帖子
+                    recommended = details.get('recommended_topics', [])
+                    if recommended:
+                        f.write(f"📌 推荐帖子 (共 {len(recommended)} 个):\n\n")
+                        for i, topic in enumerate(recommended[:10], 1):
+                            f.write(f"{i}. {topic.get('title', '无标题')}\n")
+                            f.write(f"   作者: {topic.get('author', '未知')} | ")
+                            f.write(f"回复: {topic.get('replies', '0')} | ")
+                            f.write(f"浏览: {topic.get('views', '0')}\n")
+                            f.write(f"   链接: {topic.get('link', '')}\n")
+
+                            if topic.get('recommendation_reason'):
+                                f.write(f"   💡 推荐理由: {topic['recommendation_reason']}\n")
+
+                            # AI 总结
+                            if topic.get('ai_summary'):
+                                summary = topic['ai_summary']
+                                if summary.get('summary'):
+                                    f.write(f"   📝 AI 总结: {summary['summary']}\n")
+                                if summary.get('key_points'):
+                                    f.write(f"   🔑 关键点:\n")
+                                    for point in summary['key_points']:
+                                        f.write(f"      • {point}\n")
+                                if summary.get('tags'):
+                                    f.write(f"   🏷️  标签: {', '.join(summary['tags'])}\n")
+
+                            f.write("\n")
+
+                    # 输出完整总结文本
+                    if details.get('summary'):
+                        f.write("\n" + "=" * 80 + "\n")
+                        f.write("详细总结:\n")
+                        f.write("=" * 80 + "\n")
+                        f.write(details['summary'])
+                        f.write("\n")
+
+        logger.info(f"✅ 总结已保存到: {output_file}")
+        logger.info(f"✅ 完整数据已保存到: {json_file}")
+
+    except Exception as e:
+        logger.error(f"保存总结失败: {str(e)}")
+
+
 async def run_linuxdo(
     config_file: str = "config.yaml",
     debug: bool = False,
@@ -217,6 +301,9 @@ async def run_linuxdo(
     logger.info("=" * 60)
     logger.info(f"执行完成: 成功 {success}/{total}, 失败 {failed}")
     logger.info("=" * 60)
+
+    # 保存总结到文件
+    _save_summary_to_file(results, logger)
 
     # 发送邮件通知
     email_config = config.get('notifications', {}).get('email', {})

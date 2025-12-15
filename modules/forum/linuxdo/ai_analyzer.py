@@ -79,23 +79,24 @@ class AIAnalyzer:
             return self._simple_summary(content)
 
         try:
-            # 导入 OpenAI 兼容库（阿里云通义千问兼容 OpenAI 格式）
+            # 导入新版 OpenAI 库
             try:
-                import openai
+                from openai import AsyncOpenAI
             except ImportError:
                 self.logger.error("未安装 openai 库，请运行: pip install openai")
                 return self._simple_summary(content)
 
-            # 配置 API（阿里云通义千问兼容 OpenAI API 格式）
-            if self.api_base:
-                openai.api_base = self.api_base
-            openai.api_key = self.api_key
+            # 创建客户端（新版 API）
+            client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.api_base
+            )
 
             # 构建提示词
             prompt = self._build_summary_prompt(topic, content)
 
-            # 调用 AI 模型（qwen-flash）
-            response = await openai.ChatCompletion.acreate(
+            # 调用 AI 模型
+            response = await client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "你是一个专业的内容分析助手，擅长提炼文章要点和识别关键信息。"},
@@ -136,17 +137,19 @@ class AIAnalyzer:
             return self._simple_ranking(topics)
 
         try:
-            import openai
+            from openai import AsyncOpenAI
 
-            if self.api_base:
-                openai.api_base = self.api_base
-            openai.api_key = self.api_key
+            # 创建客户端（新版 API）
+            client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.api_base
+            )
 
             # 构建分析提示词
             prompt = self._build_interest_prompt(topics, user_profile)
 
-            # 调用 AI 模型（qwen-flash）
-            response = await openai.ChatCompletion.acreate(
+            # 调用 AI 模型
+            response = await client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "你是一个内容推荐专家，擅长分析用户兴趣并推荐相关内容。"},
