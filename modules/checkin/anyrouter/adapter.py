@@ -1,5 +1,6 @@
 """AnyRouter 站点适配器"""
 import sys
+import re
 from pathlib import Path
 
 # 添加项目根目录到路径
@@ -33,56 +34,44 @@ class AnyrouterAdapter(BaseAdapter):
         """
         检查是否已登录
 
-        通过访问用户中心或检查特定元素来判断
+        通过访问控制台页面判断登录状态
         """
         try:
-            # 访问首页
-            await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            # 直接访问控制台页面（需要登录才能访问）
+            console_url = f"{self.site_url}/console"
+            await self.page.goto(console_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
 
-            # 等待页面稳定（等待网络请求完成）
+            # 等待页面稳定
             await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
 
-            # 方法1: 检查 URL 是否在登录页
+            # 方法1: 检查 URL 是否被重定向到登录页
             current_url = self.page.url
             if '/auth/login' in current_url or '/login' in current_url:
+                self.logger.debug("URL 重定向到登录页，未登录")
                 return False
 
-            # 方法2: 尝试查找用户相关元素（可能需要调整选择器）
-            user_indicators = [
-                'a[href*="user"]',
-                'a[href*="logout"]',
-                '.user-info',
-                '.user-menu',
-                '#user-menu'
-            ]
+            # 方法2: 检查页面内容是否包含控制台相关元素
+            page_content = await self.page.content()
 
-            for selector in user_indicators:
-                try:
-                    element = await self.page.wait_for_selector(
-                        selector,
-                        timeout=3000,  # 每个选择器只等待3秒
-                        state='visible'
-                    )
-                    if element:
-                        self.logger.debug(f"找到登录状态指示器: {selector}")
-                        return True
-                except:
-                    continue
+            # 检查控制台关键字
+            console_keywords = ['Console', 'Dashboard', 'Account Data', '账户数据', 'Current balance']
+            has_console_content = any(keyword in page_content for keyword in console_keywords)
 
-            # 方法3: 检查是否有登录按钮（如果有说明未登录）
+            if has_console_content:
+                self.logger.debug("检测到控制台页面内容，已登录")
+                return True
+
+            # 方法3: 检查是否有登录表单（如果有说明未登录）
             try:
-                login_button = await self.page.wait_for_selector(
-                    'a[href*="login"]',
-                    timeout=2000,
-                    state='visible'
-                )
-                if login_button:
+                login_form = await self.page.query_selector('input[type="password"]')
+                if login_form:
+                    self.logger.debug("检测到登录表单，未登录")
                     return False
             except:
                 pass
 
-            # 默认假设已登录（由于有会话恢复）
-            self.logger.warning("无法确定登录状态，假设已登录")
+            # 如果能访问控制台页面且没有重定向，默认认为已登录
+            self.logger.debug("页面未重定向到登录页，假设已登录")
             return True
 
         except Exception as e:
@@ -308,30 +297,48 @@ class AnyrouterAdapter(BaseAdapter):
 
             await self.take_screenshot("console_page")
 
-            # 查找余额信息
-            balance_selectors = [
-                'div:has-text("当前余额") + div',  # 余额文本下方的 div
-                'div.text-lg.font-semibold',  # 根据类名查找
-                'div:has-text("$")',  # 包含美元符号的元素
+            # 获取页面内容
+            page_content = await self.page.content()
+
+            # 使用正则表达式提取余额
+            # 匹配格式：Current balance$424.96 或 当前余额$100.00
+            balance_patterns = [
+                r'Current balance\$?([\d,.]+)',  # Current balance$424.96
+                r'当前余额\$?([\d,.]+)',           # 当前余额$100.00
+                r'balance[:\s]*\$?([\d,.]+)',    # balance: $100.00
+                r'Balance[:\s]*\$?([\d,.]+)',    # Balance: $100.00
             ]
 
             balance_text = None
-            for selector in balance_selectors:
-                try:
-                    # 等待元素出现
-                    await self.page.wait_for_selector(selector, timeout=5000, state='visible')
-                    elements = await self.page.query_selector_all(selector)
-                    for element in elements:
-                        text = await element.text_content()
-                        if text and '$' in text:
-                            balance_text = text.strip()
-                            self.logger.info(f"找到余额: {balance_text}")
-                            break
-                    if balance_text:
-                        break
-                except Exception as e:
-                    self.logger.debug(f"选择器 {selector} 失败: {e}")
-                    continue
+            for pattern in balance_patterns:
+                match = re.search(pattern, page_content, re.IGNORECASE)
+                if match:
+                    balance_value = match.group(1)
+                    balance_text = f"${balance_value}"
+                    self.logger.info(f"提取到余额: {balance_text}")
+                    break
+
+            if not balance_text:
+                # 尝试从页面元素中提取
+                balance_selectors = [
+                    'div:has-text("Current balance") + div',
+                    'div:has-text("当前余额") + div',
+                ]
+
+                for selector in balance_selectors:
+                    try:
+                        element = await self.page.wait_for_selector(selector, timeout=3000, state='visible')
+                        if element:
+                            text = await element.text_content()
+                            # 从文本中提取金额
+                            match = re.search(r'\$?([\d,.]+)', text)
+                            if match:
+                                balance_text = f"${match.group(1)}"
+                                self.logger.info(f"从元素提取到余额: {balance_text}")
+                                break
+                    except Exception as e:
+                        self.logger.debug(f"选择器 {selector} 失败: {e}")
+                        continue
 
             if balance_text:
                 return CheckinResult(

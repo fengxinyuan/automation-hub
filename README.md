@@ -209,6 +209,41 @@ python3 scripts/batch_run.py --all
 
 ---
 
+## 🛠️ 实用工具
+
+项目提供了一些实用脚本帮助管理和维护：
+
+### 配置检查
+
+检查所有模块的配置文件是否正确：
+
+```bash
+python3 scripts/check_config.py
+```
+
+该脚本会：
+- 检查配置文件是否存在
+- 验证 YAML 格式
+- 检查必需字段
+- 列出警告和错误
+
+### 日志清理
+
+清理旧的日志文件和截图：
+
+```bash
+# 清理 7 天前的日志（默认）
+python3 scripts/clean_logs.py
+
+# 清理 30 天前的日志
+python3 scripts/clean_logs.py --days 30
+
+# 模拟运行，查看将删除哪些文件
+python3 scripts/clean_logs.py --dry-run
+```
+
+---
+
 ## ⏰ 定时任务
 
 使用 cron 设置定时执行：

@@ -190,8 +190,13 @@ class BaseAdapter(ABC):
         """
         if self.page:
             try:
-                screenshot_path = f"logs/{self.site_name}_{self.username}_{name}.png"
-                await self.page.screenshot(path=screenshot_path)
+                from pathlib import Path
+                # 确保日志目录存在
+                log_dir = Path("logs")
+                log_dir.mkdir(exist_ok=True)
+
+                screenshot_path = log_dir / f"{self.site_name}_{self.username}_{name}.png"
+                await self.page.screenshot(path=str(screenshot_path))
                 self.logger.debug(f"截图已保存: {screenshot_path}")
             except Exception as e:
                 self.logger.warning(f"截图失败: {str(e)}")
