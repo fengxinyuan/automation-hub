@@ -173,8 +173,16 @@ async def run_linuxdo(
     hot_limit = content_config.get('hot_topics_limit', 10)
     read_limit = content_config.get('read_content_limit', 5)
     ai_limit = content_config.get('ai_analysis_limit', 3)
+    enable_scroll = content_config.get('enable_scroll_loading', False)
+    scroll_times = content_config.get('scroll_times', 3)
+    scroll_interval = content_config.get('scroll_interval', 2)
+    fetch_categories = content_config.get('fetch_priority_categories', False)
 
     logger.info(f"内容获取配置: 最新{latest_limit}条, 热门{hot_limit}条, 深度阅读{read_limit}条, AI分析{ai_limit}条")
+    if enable_scroll:
+        logger.info(f"滚动加载已启用: {scroll_times}次滚动, 间隔{scroll_interval}秒")
+    if fetch_categories:
+        logger.info(f"优先分类获取已启用")
 
     # 获取过滤配置
     filter_config = config.get('filter', {})
@@ -268,6 +276,10 @@ async def run_linuxdo(
                     hot_limit=hot_limit,
                     read_limit=read_limit,
                     ai_limit=ai_limit,
+                    enable_scroll_loading=enable_scroll,
+                    scroll_times=scroll_times,
+                    scroll_interval=scroll_interval,
+                    fetch_priority_categories=fetch_categories,
                     # 传入过滤配置
                     exclude_categories=exclude_categories,
                     exclude_keywords=exclude_keywords,

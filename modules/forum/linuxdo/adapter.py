@@ -102,6 +102,10 @@ class LinuxDoAdapter(BaseAdapter):
         hot_limit: int = 10,
         read_limit: int = 5,
         ai_limit: int = 3,
+        enable_scroll_loading: bool = False,
+        scroll_times: int = 3,
+        scroll_interval: float = 2.0,
+        fetch_priority_categories: bool = False,
         # 过滤配置
         exclude_categories: Optional[List[str]] = None,
         exclude_keywords: Optional[List[str]] = None,
@@ -130,6 +134,10 @@ class LinuxDoAdapter(BaseAdapter):
             hot_limit: 获取热门帖子数量
             read_limit: 深度阅读帖子数量
             ai_limit: AI 分析帖子数量
+            enable_scroll_loading: 是否启用滚动加载
+            scroll_times: 滚动次数
+            scroll_interval: 滚动间隔（秒）
+            fetch_priority_categories: 是否获取优先分类的帖子
             exclude_categories: 排除的分类列表
             exclude_keywords: 排除的关键词列表
             priority_categories: 优先分类列表
@@ -157,6 +165,10 @@ class LinuxDoAdapter(BaseAdapter):
         self.hot_limit = hot_limit
         self.read_limit = read_limit
         self.ai_limit = ai_limit
+        self.enable_scroll_loading = enable_scroll_loading
+        self.scroll_times = scroll_times
+        self.scroll_interval = scroll_interval
+        self.fetch_priority_categories = fetch_priority_categories
         self.user_interests = user_interests
 
         # 保存过滤配置（使用默认值如果未提供）
@@ -591,28 +603,60 @@ class LinuxDoAdapter(BaseAdapter):
 
             self.logger.info(f"  获取热门帖子（{self.hot_limit} 条）...")
             hot_topics_raw = await self.get_hot_topics(limit=self.hot_limit)
+            await asyncio.sleep(0.5)  # 请求间隔
+
+            # 如果启用了优先分类获取，从关注的分类中获取更多帖子
+            category_topics_raw = []
+            if self.fetch_priority_categories and self.priority_categories:
+                self.logger.info(f"  从优先分类获取帖子...")
+                for category in list(self.priority_categories)[:2]:  # 限制最多2个分类，避免请求过多
+                    try:
+                        topics = await self.get_category_topics(category, limit=20)
+                        category_topics_raw.extend(topics)
+                        await asyncio.sleep(0.5)  # 请求间隔
+                    except Exception as e:
+                        self.logger.warning(f"从分类 '{category}' 获取失败: {str(e)}")
+
+                self.logger.info(f"  从优先分类获取到 {len(category_topics_raw)} 个帖子")
 
             # 应用内容过滤
             latest_topics = self._filter_quality_topics(latest_topics_raw)
             hot_topics = self._filter_quality_topics(hot_topics_raw)
+            category_topics = self._filter_quality_topics(category_topics_raw) if category_topics_raw else []
 
             self.logger.info(f"✓ 最新帖子: {len(latest_topics)} 个")
             self.logger.info(f"✓ 热门帖子: {len(hot_topics)} 个")
+            if category_topics:
+                self.logger.info(f"✓ 分类帖子: {len(category_topics)} 个")
 
-            # 并发读取帖子内容（性能优化）
+            # 合并所有帖子并去重
+            all_topics_raw = latest_topics + hot_topics + category_topics
+            seen = set()
+            all_topics = []
+            for t in all_topics_raw:
+                if t['link'] not in seen:
+                    seen.add(t['link'])
+                    all_topics.append(t)
+
+            # 按评分重新排序（最高质量的在前）
+            all_topics.sort(key=lambda t: t.get('quality_score', 0), reverse=True)
+
+            self.logger.info(f"✓ 去重后总共: {len(all_topics)} 个帖子")
+
+            # 并发读取帖子内容（从高质量帖子中选择）
             self.logger.info(f"并发读取帖子内容（{self.read_limit} 条）...")
-            read_count = min(self.read_limit, len(hot_topics))
+            read_count = min(self.read_limit, len(all_topics))
 
             # 使用 asyncio.gather 并发获取
             content_tasks = [
                 self.get_topic_content(topic['link'])
-                for topic in hot_topics[:read_count]
+                for topic in all_topics[:read_count]
             ]
             contents = await asyncio.gather(*content_tasks, return_exceptions=True)
 
             # 处理结果
             topics_with_content = []
-            for topic, content in zip(hot_topics[:read_count], contents):
+            for topic, content in zip(all_topics[:read_count], contents):
                 if isinstance(content, Exception):
                     self.logger.warning(f"获取内容失败: {topic['title'][:30]}")
                     continue
@@ -672,14 +716,6 @@ class LinuxDoAdapter(BaseAdapter):
 
             # 使用 AI 进行兴趣推荐
             self.logger.info("生成推荐列表...")
-            all_topics = latest_topics + hot_topics
-            # 去重
-            seen = set()
-            unique_topics = []
-            for t in all_topics:
-                if t['link'] not in seen:
-                    seen.add(t['link'])
-                    unique_topics.append(t)
 
             # 构建用户画像（如果配置了）
             user_profile = None
@@ -689,7 +725,7 @@ class LinuxDoAdapter(BaseAdapter):
                 }
 
             recommended_topics = await self.ai_analyzer.analyze_interests(
-                topics=unique_topics,
+                topics=all_topics,
                 user_profile=user_profile
             )
 
@@ -703,10 +739,11 @@ class LinuxDoAdapter(BaseAdapter):
 
             return CheckinResult(
                 True,
-                f"成功获取论坛动态并生成 AI 分析（共{len(unique_topics)}个帖子，推荐{len(recommended_topics[:10])}个）",
+                f"成功获取论坛动态并生成 AI 分析（共{len(all_topics)}个帖子，推荐{len(recommended_topics[:10])}个）",
                 {
                     "latest_topics": latest_topics,
                     "hot_topics": hot_topics,
+                    "category_topics": category_topics,
                     "topics_with_content": topics_with_content,
                     "ai_summaries": ai_summaries,
                     "recommended_topics": recommended_topics[:10],  # 只保留前10个推荐
@@ -721,7 +758,7 @@ class LinuxDoAdapter(BaseAdapter):
 
     async def get_latest_topics(self, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        获取最新帖子列表
+        获取最新帖子列表（支持滚动加载）
 
         Args:
             limit: 获取数量限制
@@ -734,6 +771,25 @@ class LinuxDoAdapter(BaseAdapter):
             latest_url = f"{self.site_url}/latest"
             await self.page.goto(latest_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
             await asyncio.sleep(2)
+
+            # 如果启用了滚动加载，滚动页面加载更多内容
+            if self.enable_scroll_loading:
+                self.logger.debug(f"开始滚动加载更多帖子（{self.scroll_times}次）...")
+                for i in range(self.scroll_times):
+                    # 滚动到页面底部
+                    await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await asyncio.sleep(self.scroll_interval)
+
+                    # 检查是否还有新内容
+                    current_count = await self.page.evaluate(
+                        "document.querySelectorAll('.topic-list-item, [data-topic-id]').length"
+                    )
+                    self.logger.debug(f"  滚动 {i+1}/{self.scroll_times}，当前帖子数：{current_count}")
+
+                    # 如果已经达到目标数量，可以提前退出
+                    if current_count >= limit:
+                        self.logger.debug(f"  已达到目标数量 {limit}，停止滚动")
+                        break
 
             await self.take_screenshot("latest_topics")
 
@@ -796,7 +852,7 @@ class LinuxDoAdapter(BaseAdapter):
 
     async def get_hot_topics(self, limit: int = 5) -> List[Dict[str, Any]]:
         """
-        获取热门帖子列表
+        获取热门帖子列表（支持滚动加载）
 
         Args:
             limit: 获取数量限制
@@ -809,6 +865,22 @@ class LinuxDoAdapter(BaseAdapter):
             hot_url = f"{self.site_url}/top"
             await self.page.goto(hot_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
             await asyncio.sleep(2)
+
+            # 如果启用了滚动加载，滚动页面加载更多内容
+            if self.enable_scroll_loading:
+                self.logger.debug(f"开始滚动加载更多热门帖子（{self.scroll_times}次）...")
+                for i in range(self.scroll_times):
+                    await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await asyncio.sleep(self.scroll_interval)
+
+                    current_count = await self.page.evaluate(
+                        "document.querySelectorAll('.topic-list-item, [data-topic-id]').length"
+                    )
+                    self.logger.debug(f"  滚动 {i+1}/{self.scroll_times}，当前帖子数：{current_count}")
+
+                    if current_count >= limit:
+                        self.logger.debug(f"  已达到目标数量 {limit}，停止滚动")
+                        break
 
             await self.take_screenshot("hot_topics")
 
@@ -862,6 +934,99 @@ class LinuxDoAdapter(BaseAdapter):
 
         except Exception as e:
             self.logger.error(f"获取热门帖子失败: {str(e)}")
+            return []
+
+    async def get_category_topics(self, category_name: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        从特定分类获取帖子
+
+        Args:
+            category_name: 分类名称（如"福利羊毛"）
+            limit: 获取数量限制
+
+        Returns:
+            帖子列表
+        """
+        try:
+            # 根据分类名称构建 URL（Discourse 的分类 URL 格式）
+            # Linux.do 的分类 URL 格式: https://linux.do/c/{category-slug}/{id}
+            # 需要先映射分类名称到 slug
+            category_map = {
+                '福利羊毛': 'welfare',
+                '优惠活动': 'promotion',
+                '工具分享': 'tools',
+                '开发调优': 'dev',
+                '资源荟萃': 'resources'
+            }
+
+            category_slug = category_map.get(category_name, category_name.lower())
+
+            # 尝试通过搜索找到分类
+            # 或者直接访问分类页面（如果知道ID）
+            # 这里我们使用搜索功能来找到分类帖子
+            search_url = f"{self.site_url}/latest?category={category_slug}"
+
+            self.logger.debug(f"访问分类页面: {search_url}")
+            await self.page.goto(search_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await asyncio.sleep(2)
+
+            # 滚动加载更多
+            if self.enable_scroll_loading:
+                self.logger.debug(f"在分类 '{category_name}' 中滚动加载...")
+                for i in range(self.scroll_times):
+                    await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    await asyncio.sleep(self.scroll_interval)
+
+            # 提取帖子
+            topics = await self.page.evaluate(f"""
+                (limit) => {{
+                    const topics = [];
+                    const topicElements = document.querySelectorAll('.topic-list-item, [data-topic-id]');
+
+                    topicElements.forEach((el, idx) => {{
+                        if (idx >= limit) return;
+
+                        const titleEl = el.querySelector('.title a, .topic-title a, a.title');
+                        const title = titleEl ? titleEl.textContent.trim() : '';
+                        const link = titleEl ? titleEl.getAttribute('href') : '';
+
+                        const authorEl = el.querySelector('.topic-poster a, .author a');
+                        const author = authorEl ? authorEl.getAttribute('data-user-card') || authorEl.textContent.trim() : '';
+
+                        const repliesEl = el.querySelector('.posts, .num.posts');
+                        const replies = repliesEl ? repliesEl.textContent.trim() : '0';
+
+                        const viewsEl = el.querySelector('.views, .num.views');
+                        const views = viewsEl ? viewsEl.textContent.trim() : '0';
+
+                        const activityEl = el.querySelector('.age.activity a, time');
+                        const lastActivity = activityEl ? activityEl.getAttribute('title') || activityEl.textContent.trim() : '';
+
+                        const categoryEl = el.querySelector('.category, .badge-category');
+                        const category = categoryEl ? categoryEl.textContent.trim() : '';
+
+                        if (title && link) {{
+                            topics.push({{
+                                title,
+                                link,
+                                author,
+                                replies,
+                                views,
+                                lastActivity,
+                                category
+                            }});
+                        }}
+                    }});
+
+                    return topics;
+                }}
+            """, limit)
+
+            self.logger.info(f"从分类 '{category_name}' 获取到 {len(topics)} 个帖子")
+            return topics
+
+        except Exception as e:
+            self.logger.error(f"从分类 '{category_name}' 获取帖子失败: {str(e)}")
             return []
 
     async def get_topic_content(self, topic_link: str) -> Dict[str, str]:
