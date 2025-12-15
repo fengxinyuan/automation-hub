@@ -35,6 +35,13 @@ class LinuxDoAdapter(BaseAdapter):
         hot_limit: int = 10,
         read_limit: int = 5,
         ai_limit: int = 3,
+        # 过滤配置
+        exclude_categories: Optional[List[str]] = None,
+        exclude_keywords: Optional[List[str]] = None,
+        priority_categories: Optional[List[str]] = None,
+        min_replies: int = 0,
+        min_views: int = 50,
+        min_score_for_zero_replies: int = 50,
         # AI 配置
         ai_enabled: bool = True,
         ai_api_key: Optional[str] = None,
@@ -56,6 +63,12 @@ class LinuxDoAdapter(BaseAdapter):
             hot_limit: 获取热门帖子数量
             read_limit: 深度阅读帖子数量
             ai_limit: AI 分析帖子数量
+            exclude_categories: 排除的分类列表
+            exclude_keywords: 排除的关键词列表
+            priority_categories: 优先分类列表
+            min_replies: 最小回复数
+            min_views: 最小浏览数
+            min_score_for_zero_replies: 0回复帖子的最小浏览数
             ai_enabled: 是否启用 AI 功能
             ai_api_key: AI API 密钥
             ai_api_base: AI API 端点
@@ -72,12 +85,30 @@ class LinuxDoAdapter(BaseAdapter):
             logger=logger
         )
 
-        # 保存配置
+        # 保存内容获取配置
         self.latest_limit = latest_limit
         self.hot_limit = hot_limit
         self.read_limit = read_limit
         self.ai_limit = ai_limit
         self.user_interests = user_interests
+
+        # 保存过滤配置（使用默认值如果未提供）
+        self.exclude_categories = set(exclude_categories or [
+            '公告', '运营反馈', '站务', 'Announcement', 'Feedback'
+        ])
+        self.exclude_keywords = exclude_keywords or [
+            '社区公约', '抽奖规则', '园丁邀请', '阻断', '戾气',
+            '社区规则', '论坛公告', '管理员', '版规', '封禁',
+            '人设贴', '水贴', '灌水'
+        ]
+        self.priority_categories = set(priority_categories or [
+            '开发调优', 'Linux', '服务器管理', '自动化运维',
+            '工具分享', '教程', '技术讨论', '编程', 'AI',
+            '云计算', 'Docker', 'DevOps'
+        ])
+        self.min_replies = min_replies
+        self.min_views = min_views
+        self.min_score_for_zero_replies = min_score_for_zero_replies
 
         # 初始化 AI 分析器（如果启用）
         if ai_enabled:
@@ -98,35 +129,104 @@ class LinuxDoAdapter(BaseAdapter):
             # 创建一个禁用的 AI 分析器
             self.ai_analyzer = AIAnalyzer(api_key=None, logger=logger)
 
+    def _calculate_topic_score(self, topic: Dict[str, Any]) -> float:
+        """
+        计算帖子的综合评分
+
+        评分维度：
+        1. 基础热度：回复数 + 浏览数
+        2. 互动率：回复数/浏览数比例
+        3. 优先分类加成
+        4. 用户兴趣匹配度
+        5. 时效性（如果有时间信息）
+
+        Args:
+            topic: 帖子信息
+
+        Returns:
+            综合评分（0-100）
+        """
+        try:
+            # 解析数值（处理 k/万等单位）
+            def parse_number(value):
+                if not value:
+                    return 0
+                s = str(value).lower()
+                # 处理 k 后缀（1k = 1000）
+                if 'k' in s:
+                    s = s.replace('k', '').replace('.', '')
+                    return int(float(s) * 100) if '.' in str(value) else int(s) * 1000
+                # 处理万后缀
+                if '万' in s:
+                    return int(float(s.replace('万', '')) * 10000)
+                # 处理小数点（3.5k -> 3500）
+                try:
+                    return int(float(s))
+                except:
+                    return 0
+
+            replies = parse_number(topic.get('replies', 0))
+            views = parse_number(topic.get('views', 0))
+            category = topic.get('category', '')
+            title = topic.get('title', '')
+
+            # 1. 基础热度分 (0-40分)
+            # 使用对数缩放避免大数字主导
+            import math
+            heat_score = min(40, (math.log10(replies + 1) * 10 + math.log10(views + 1) * 3))
+
+            # 2. 互动率分 (0-20分)
+            # 高互动率说明内容有价值
+            interaction_rate = replies / max(views, 1) * 100
+            interaction_score = min(20, interaction_rate * 100)
+
+            # 3. 优先分类加成 (0-20分)
+            category_score = 0
+            if category in self.priority_categories:
+                category_score = 20
+            elif any(pri_cat in category or pri_cat.lower() in title.lower()
+                    for pri_cat in self.priority_categories):
+                category_score = 10
+
+            # 4. 用户兴趣匹配度 (0-20分)
+            interest_score = 0
+            if self.user_interests:
+                # 检查标题和分类是否包含用户兴趣关键词
+                content_text = f"{title} {category}".lower()
+                matches = sum(1 for interest in self.user_interests
+                            if interest.lower() in content_text)
+                interest_score = min(20, matches * 10)
+
+            # 总分
+            total_score = heat_score + interaction_score + category_score + interest_score
+
+            # 存储评分信息用于调试
+            topic['_score_details'] = {
+                'heat': round(heat_score, 2),
+                'interaction': round(interaction_score, 2),
+                'category': category_score,
+                'interest': interest_score,
+                'total': round(total_score, 2)
+            }
+
+            return total_score
+
+        except Exception as e:
+            self.logger.debug(f"计算评分失败: {str(e)}")
+            return 0
+
     def _filter_quality_topics(self, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         过滤优质内容，移除站务、公告等无关内容
+
+        使用配置的过滤规则和智能评分系统
 
         Args:
             topics: 帖子列表
 
         Returns:
-            过滤后的帖子列表
+            过滤并排序后的帖子列表
         """
-        # 需要过滤的分类
-        exclude_categories = {
-            '公告', '运营反馈', '站务', 'Announcement', 'Feedback'
-        }
-
-        # 需要过滤的关键词
-        exclude_keywords = [
-            '社区公约', '抽奖规则', '园丁邀请', '阻断', '戾气',
-            '社区规则', '论坛公告', '管理员', '版规', '封禁',
-            '人设贴', '水贴', '灌水'
-        ]
-
-        # 优先关注的分类（根据用户兴趣）
-        priority_categories = {
-            '开发调优', 'Linux', '服务器管理', '自动化运维',
-            '工具分享', '教程', '技术讨论', '编程', 'AI',
-            '云计算', 'Docker', 'DevOps'
-        }
-
         filtered_topics = []
 
         for topic in topics:
@@ -134,35 +234,66 @@ class LinuxDoAdapter(BaseAdapter):
             category = topic.get('category', '')
 
             # 过滤：排除特定分类
-            if category in exclude_categories:
+            if category in self.exclude_categories:
                 self.logger.debug(f"过滤分类 '{category}': {title[:30]}")
                 continue
 
             # 过滤：排除包含特定关键词的帖子
-            if any(keyword in title for keyword in exclude_keywords):
+            if any(keyword in title for keyword in self.exclude_keywords):
                 self.logger.debug(f"过滤关键词: {title[:30]}")
                 continue
 
-            # 过滤：排除回复数为0且浏览数很低的帖子（可能是垃圾内容）
+            # 过滤：排除低质量帖子
             try:
-                replies = int(str(topic.get('replies', '0')).replace('k', '000').replace('.', ''))
-                views = int(str(topic.get('views', '0')).replace('k', '000').replace('.', ''))
+                def parse_number(value):
+                    if not value:
+                        return 0
+                    s = str(value).lower()
+                    if 'k' in s:
+                        s = s.replace('k', '').replace('.', '')
+                        return int(float(s) * 100) if '.' in str(value) else int(s) * 1000
+                    try:
+                        return int(float(s))
+                    except:
+                        return 0
 
-                if replies == 0 and views < 50:
+                replies = parse_number(topic.get('replies', '0'))
+                views = parse_number(topic.get('views', '0'))
+
+                # 0回复的帖子需要更高的浏览数
+                if replies == 0 and views < self.min_score_for_zero_replies:
+                    self.logger.debug(f"过滤低质量（0回复，低浏览）: {title[:30]}")
+                    continue
+
+                # 普通质量过滤
+                if replies < self.min_replies and views < self.min_views:
                     self.logger.debug(f"过滤低质量: {title[:30]}")
                     continue
-            except:
+
+            except Exception as e:
+                self.logger.debug(f"解析数值失败: {str(e)}")
                 pass
 
-            # 添加优先级标记（用于后续排序）
-            topic['is_priority'] = any(
+            # 计算综合评分
+            score = self._calculate_topic_score(topic)
+            topic['quality_score'] = score
+
+            # 添加优先级标记（向后兼容）
+            topic['is_priority'] = category in self.priority_categories or any(
                 cat in category or cat.lower() in title.lower()
-                for cat in priority_categories
+                for cat in self.priority_categories
             )
 
             filtered_topics.append(topic)
 
-        self.logger.info(f"内容过滤: {len(topics)} -> {len(filtered_topics)} 个帖子")
+        # 按综合评分排序（从高到低）
+        filtered_topics.sort(key=lambda t: t.get('quality_score', 0), reverse=True)
+
+        self.logger.info(
+            f"内容过滤: {len(topics)} -> {len(filtered_topics)} 个帖子 "
+            f"(平均评分: {sum(t.get('quality_score', 0) for t in filtered_topics) / max(len(filtered_topics), 1):.1f})"
+        )
+
         return filtered_topics
 
     async def is_logged_in(self) -> bool:

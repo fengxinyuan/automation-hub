@@ -176,6 +176,22 @@ async def run_linuxdo(
 
     logger.info(f"内容获取配置: 最新{latest_limit}条, 热门{hot_limit}条, 深度阅读{read_limit}条, AI分析{ai_limit}条")
 
+    # 获取过滤配置
+    filter_config = config.get('filter', {})
+    exclude_categories = filter_config.get('exclude_categories', [])
+    exclude_keywords = filter_config.get('exclude_keywords', [])
+    priority_categories = filter_config.get('priority_categories', [])
+
+    quality_config = filter_config.get('quality', {})
+    min_replies = quality_config.get('min_replies', 0)
+    min_views = quality_config.get('min_views', 50)
+    min_score_for_zero_replies = quality_config.get('min_score_for_zero_replies', 50)
+
+    if exclude_categories or exclude_keywords:
+        logger.info(f"过滤规则: 排除{len(exclude_categories)}个分类, {len(exclude_keywords)}个关键词")
+    if priority_categories:
+        logger.info(f"优先关注: {len(priority_categories)}个技术分类")
+
     # 获取 AI 配置
     ai_config = config.get('ai', {})
     ai_enabled = ai_config.get('enabled', True)
@@ -252,6 +268,13 @@ async def run_linuxdo(
                     hot_limit=hot_limit,
                     read_limit=read_limit,
                     ai_limit=ai_limit,
+                    # 传入过滤配置
+                    exclude_categories=exclude_categories,
+                    exclude_keywords=exclude_keywords,
+                    priority_categories=priority_categories,
+                    min_replies=min_replies,
+                    min_views=min_views,
+                    min_score_for_zero_replies=min_score_for_zero_replies,
                     # 传入 AI 配置（使用解析后的变量）
                     ai_enabled=ai_enabled,
                     ai_api_key=api_key,

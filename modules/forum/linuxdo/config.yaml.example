@@ -30,6 +30,57 @@ content:
   # AI 分析数量（调用 AI 进行深度分析）
   ai_analysis_limit: 3
 
+# 内容过滤配置（可自定义）
+filter:
+  # 排除的分类（不想看的内容类型）
+  exclude_categories:
+    - 公告
+    - 运营反馈
+    - 站务
+    - Announcement
+    - Feedback
+
+  # 排除的关键词（标题包含这些词的帖子会被过滤）
+  exclude_keywords:
+    - 社区公约
+    - 抽奖规则
+    - 园丁邀请
+    - 阻断
+    - 戾气
+    - 社区规则
+    - 论坛公告
+    - 管理员
+    - 版规
+    - 封禁
+    - 人设贴
+    - 水贴
+    - 灌水
+
+  # 优先关注的分类（技术相关分类）
+  priority_categories:
+    - 开发调优
+    - Linux
+    - 服务器管理
+    - 自动化运维
+    - 工具分享
+    - 教程
+    - 技术讨论
+    - 编程
+    - AI
+    - 云计算
+    - Docker
+    - DevOps
+    - Kubernetes
+    - Python
+    - Golang
+    - 数据库
+
+  # 质量阈值
+  quality:
+    min_replies: 0      # 最小回复数（0表示接受0回复的新帖）
+    min_views: 50       # 最小浏览数
+    min_score_for_zero_replies: 50  # 0回复帖子的最小浏览数阈值
+
 # AI 配置（使用阿里云通义千问）
 ai:
   enabled: true  # 设置为 false 禁用 AI 功能
