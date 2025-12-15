@@ -196,7 +196,7 @@ class BaseAdapter(ABC):
                 log_dir.mkdir(exist_ok=True)
 
                 screenshot_path = log_dir / f"{self.site_name}_{self.username}_{name}.png"
-                await self.page.screenshot(path=str(screenshot_path))
+                await self.page.screenshot(path=str(screenshot_path), timeout=60000)  # 增加超时到 60 秒
                 self.logger.debug(f"截图已保存: {screenshot_path}")
             except Exception as e:
-                self.logger.warning(f"截图失败: {str(e)}")
+                self.logger.debug(f"截图失败: {str(e)}")  # 降级为 debug，不影响主流程

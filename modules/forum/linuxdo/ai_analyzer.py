@@ -56,7 +56,7 @@ class AIAnalyzer:
         # 检查是否配置了 API
         self.enabled = bool(self.api_key)
         if not self.enabled:
-            self.logger.warning("未配置 AI API 密钥，将使用简单文本提取（不使用 AI）")
+            self.logger.info("AI 功能未配置，将使用简单文本提取")
         else:
             self.logger.info(f"AI 分析器已启用 - 模型: {self.model}")
 
@@ -83,8 +83,7 @@ class AIAnalyzer:
             try:
                 import openai
             except ImportError:
-                self.logger.warning("未安装 openai 库，将使用简单文本提取")
-                self.logger.info("提示：运行 'pip install openai' 安装")
+                self.logger.error("未安装 openai 库，请运行: pip install openai")
                 return self._simple_summary(content)
 
             # 配置 API（阿里云通义千问兼容 OpenAI API 格式）

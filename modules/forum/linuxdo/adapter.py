@@ -114,6 +114,7 @@ class LinuxDoAdapter(BaseAdapter):
             # 检查 URL 是否在登录页
             current_url = self.page.url
             if '/login' in current_url or '/signin' in current_url:
+                self.logger.debug("URL 在登录页，未登录")
                 return False
 
             # 查找已登录状态的指示器
@@ -122,7 +123,9 @@ class LinuxDoAdapter(BaseAdapter):
                 '.header-dropdown-toggle.current-user',
                 'button.icon.btn-flat[aria-label*="用户"]',
                 'button[title*="用户菜单"]',
-                '.d-header .icons .icon[data-icon="user"]'
+                '.d-header .icons .icon[data-icon="user"]',
+                '#current-user',  # 用户 ID
+                '.user-menu'  # 用户菜单
             ]
 
             for selector in logged_in_indicators:
@@ -130,7 +133,7 @@ class LinuxDoAdapter(BaseAdapter):
                     element = await self.page.wait_for_selector(
                         selector,
                         timeout=3000,
-                        state='visible'
+                        state='attached'  # 改为 attached，不要求可见
                     )
                     if element:
                         self.logger.debug(f"找到登录状态指示器: {selector}")
@@ -140,18 +143,21 @@ class LinuxDoAdapter(BaseAdapter):
 
             # 检查是否有登录按钮（如果有说明未登录）
             try:
-                login_button = await self.page.wait_for_selector(
-                    'button:has-text("登录"), button:has-text("Login")',
-                    timeout=2000,
-                    state='visible'
-                )
+                login_button = await self.page.query_selector('button:has-text("登录"), button:has-text("Login")')
                 if login_button:
+                    self.logger.debug("检测到登录按钮，未登录")
                     return False
             except:
                 pass
 
-            # 默认假设已登录（由于有会话恢复）
-            self.logger.warning("无法确定登录状态，假设已登录")
+            # 最后检查页面内容是否包含已登录关键字
+            page_content = await self.page.content()
+            if 'current-user' in page_content or 'user-menu' in page_content:
+                self.logger.debug("页面内容检测到登录状态")
+                return True
+
+            # 如果都没检测到，假设已登录（因为有会话恢复）
+            self.logger.debug("无明确登录标识，假设已登录")
             return True
 
         except Exception as e:
@@ -318,7 +324,7 @@ class LinuxDoAdapter(BaseAdapter):
             read_count = min(self.read_limit, len(hot_topics))
 
             for i, topic in enumerate(hot_topics[:read_count], 1):
-                self.logger.info(f"正在读取第 {i}/{read_count} 个热门帖子: {topic['title'][:30]}...")
+                self.logger.debug(f"正在读取第 {i}/{read_count} 个热门帖子: {topic['title'][:30]}...")
                 content = await self.get_topic_content(topic['link'])
                 if content:
                     topic_with_content = topic.copy()
@@ -327,7 +333,7 @@ class LinuxDoAdapter(BaseAdapter):
                 await asyncio.sleep(1)
 
             # 使用 AI 进行内容分析和总结（使用配置参数）
-            self.logger.info(f"使用 AI 分析帖子内容（{self.ai_limit} 条）...")
+            self.logger.info(f"AI 分析中（共 {self.ai_limit} 个帖子）...")
             ai_summaries = []
             for topic in topics_with_content[:self.ai_limit]:  # 使用配置的数量
                 content_text = topic.get('content_summary', {}).get('first_post', '')
@@ -335,10 +341,10 @@ class LinuxDoAdapter(BaseAdapter):
                     ai_result = await self.ai_analyzer.summarize_topic(topic, content_text)
                     topic['ai_summary'] = ai_result
                     ai_summaries.append(topic)
-                    self.logger.info(f"  AI 总结完成: {topic['title'][:30]}")
+                    self.logger.debug(f"  ✓ {topic['title'][:30]}")
 
             # 使用 AI 进行兴趣推荐
-            self.logger.info("使用 AI 分析用户兴趣并推荐...")
+            self.logger.info("生成推荐列表...")
             all_topics = latest_topics + hot_topics
             # 去重
             seen = set()
