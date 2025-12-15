@@ -19,6 +19,9 @@ logs/*.png
 # 浏览器会话（包含登录信息）
 storage/sessions/
 
+# 生成的数据文件（论坛动态总结等）
+storage/data/
+
 # 配置文件（包含账号密码）
 config/sites.yaml
 config/*.yaml

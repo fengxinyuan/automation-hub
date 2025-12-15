@@ -98,6 +98,73 @@ class LinuxDoAdapter(BaseAdapter):
             # 创建一个禁用的 AI 分析器
             self.ai_analyzer = AIAnalyzer(api_key=None, logger=logger)
 
+    def _filter_quality_topics(self, topics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        过滤优质内容，移除站务、公告等无关内容
+
+        Args:
+            topics: 帖子列表
+
+        Returns:
+            过滤后的帖子列表
+        """
+        # 需要过滤的分类
+        exclude_categories = {
+            '公告', '运营反馈', '站务', 'Announcement', 'Feedback'
+        }
+
+        # 需要过滤的关键词
+        exclude_keywords = [
+            '社区公约', '抽奖规则', '园丁邀请', '阻断', '戾气',
+            '社区规则', '论坛公告', '管理员', '版规', '封禁',
+            '人设贴', '水贴', '灌水'
+        ]
+
+        # 优先关注的分类（根据用户兴趣）
+        priority_categories = {
+            '开发调优', 'Linux', '服务器管理', '自动化运维',
+            '工具分享', '教程', '技术讨论', '编程', 'AI',
+            '云计算', 'Docker', 'DevOps'
+        }
+
+        filtered_topics = []
+
+        for topic in topics:
+            title = topic.get('title', '')
+            category = topic.get('category', '')
+
+            # 过滤：排除特定分类
+            if category in exclude_categories:
+                self.logger.debug(f"过滤分类 '{category}': {title[:30]}")
+                continue
+
+            # 过滤：排除包含特定关键词的帖子
+            if any(keyword in title for keyword in exclude_keywords):
+                self.logger.debug(f"过滤关键词: {title[:30]}")
+                continue
+
+            # 过滤：排除回复数为0且浏览数很低的帖子（可能是垃圾内容）
+            try:
+                replies = int(str(topic.get('replies', '0')).replace('k', '000').replace('.', ''))
+                views = int(str(topic.get('views', '0')).replace('k', '000').replace('.', ''))
+
+                if replies == 0 and views < 50:
+                    self.logger.debug(f"过滤低质量: {title[:30]}")
+                    continue
+            except:
+                pass
+
+            # 添加优先级标记（用于后续排序）
+            topic['is_priority'] = any(
+                cat in category or cat.lower() in title.lower()
+                for cat in priority_categories
+            )
+
+            filtered_topics.append(topic)
+
+        self.logger.info(f"内容过滤: {len(topics)} -> {len(filtered_topics)} 个帖子")
+        return filtered_topics
+
     async def is_logged_in(self) -> bool:
         """
         检查是否已登录
@@ -313,10 +380,17 @@ class LinuxDoAdapter(BaseAdapter):
         try:
             # 获取帖子（使用配置参数）
             self.logger.info(f"获取最新帖子（{self.latest_limit} 条）...")
-            latest_topics = await self.get_latest_topics(limit=self.latest_limit)
+            latest_topics_raw = await self.get_latest_topics(limit=self.latest_limit)
 
             self.logger.info(f"获取热门帖子（{self.hot_limit} 条）...")
-            hot_topics = await self.get_hot_topics(limit=self.hot_limit)
+            hot_topics_raw = await self.get_hot_topics(limit=self.hot_limit)
+
+            # 应用内容过滤
+            latest_topics = self._filter_quality_topics(latest_topics_raw)
+            hot_topics = self._filter_quality_topics(hot_topics_raw)
+
+            self.logger.info(f"✓ 最新帖子: {len(latest_topics)} 个")
+            self.logger.info(f"✓ 热门帖子: {len(hot_topics)} 个")
 
             # 读取帖子内容（使用配置参数）
             self.logger.info(f"读取热门帖子内容（{self.read_limit} 条）...")
