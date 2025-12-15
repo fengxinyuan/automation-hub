@@ -97,19 +97,28 @@ async def run_linuxdo(
     ai_enabled = ai_config.get('enabled', True)
 
     if ai_enabled:
-        api_key = ai_config.get('api_key', '')
-        # 支持环境变量替换
-        if api_key.startswith('${') and api_key.endswith('}'):
-            env_var = api_key[2:-1]
-            api_key = os.getenv(env_var, '')
+        # 处理环境变量替换
+        def resolve_env_var(value):
+            """解析环境变量"""
+            if isinstance(value, str) and value.startswith('${') and value.endswith('}'):
+                env_var = value[2:-1]
+                return os.getenv(env_var, '')
+            return value
+
+        api_key = resolve_env_var(ai_config.get('api_key', ''))
+        api_base = resolve_env_var(ai_config.get('api_base', ''))
+        model = resolve_env_var(ai_config.get('model', 'qwen-flash'))
 
         if api_key:
-            logger.info(f"AI 功能已启用 - 模型: {ai_config.get('model', 'qwen-flash')}")
+            logger.info(f"AI 功能已启用 - 模型: {model} - 端点: {api_base}")
         else:
             logger.warning("AI 功能已启用但未配置 API Key，将使用简化模式")
             ai_enabled = False
     else:
         logger.info("AI 功能未启用，使用简化模式")
+        api_key = None
+        api_base = None
+        model = None
 
     # 初始化浏览器管理器
     browser_config = config.get('browser', {})
@@ -159,14 +168,14 @@ async def run_linuxdo(
                     hot_limit=hot_limit,
                     read_limit=read_limit,
                     ai_limit=ai_limit,
-                    # 传入 AI 配置
+                    # 传入 AI 配置（使用解析后的变量）
                     ai_enabled=ai_enabled,
-                    ai_api_key=ai_config.get('api_key') if ai_enabled else None,
-                    ai_api_base=ai_config.get('api_base') if ai_enabled else None,
-                    ai_model=ai_config.get('model', 'qwen-flash') if ai_enabled else None,
-                    ai_temperature=ai_config.get('temperature', 0.7) if ai_enabled else None,
-                    ai_max_tokens=ai_config.get('max_tokens', 800) if ai_enabled else None,
-                    user_interests=ai_config.get('user_interests') if ai_enabled else None
+                    ai_api_key=api_key,
+                    ai_api_base=api_base,
+                    ai_model=model,
+                    ai_temperature=ai_config.get('temperature', 0.7),
+                    ai_max_tokens=ai_config.get('max_tokens', 800),
+                    user_interests=ai_config.get('user_interests')
                 )
 
                 # 执行获取
