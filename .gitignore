@@ -22,6 +22,9 @@ storage/sessions/
 # 生成的数据文件（论坛动态总结等）
 storage/data/
 
+# 缓存文件（AI 分析结果等）
+storage/cache/
+
 # 配置文件（包含账号密码）
 config/sites.yaml
 config/*.yaml

@@ -11,6 +11,80 @@ from modules.forum.linuxdo.ai_analyzer import AIAnalyzer
 import asyncio
 from typing import List, Dict, Any, Optional
 import os
+import json
+import hashlib
+from datetime import datetime, timedelta
+
+
+class TopicCache:
+    """帖子缓存管理器"""
+
+    def __init__(self, cache_file: str, cache_days: int = 7):
+        """
+        初始化缓存管理器
+
+        Args:
+            cache_file: 缓存文件路径
+            cache_days: 缓存有效期（天）
+        """
+        self.cache_file = Path(cache_file)
+        self.cache_days = cache_days
+        self.cache: Dict[str, Dict[str, Any]] = {}
+        self._load_cache()
+
+    def _load_cache(self):
+        """加载缓存文件"""
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    self.cache = json.load(f)
+                # 清理过期缓存
+                self._clean_expired()
+            except Exception:
+                self.cache = {}
+
+    def _save_cache(self):
+        """保存缓存到文件"""
+        try:
+            self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _clean_expired(self):
+        """清理过期缓存"""
+        expiry_time = datetime.now() - timedelta(days=self.cache_days)
+        expired_keys = [
+            key for key, value in self.cache.items()
+            if datetime.fromisoformat(value.get('cached_at', '2000-01-01')) < expiry_time
+        ]
+        for key in expired_keys:
+            del self.cache[key]
+
+    def get_topic_id(self, topic: Dict[str, Any]) -> str:
+        """生成帖子唯一标识"""
+        link = topic.get('link', '')
+        return hashlib.md5(link.encode()).hexdigest()
+
+    def get(self, topic: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """获取缓存的帖子分析结果"""
+        topic_id = self.get_topic_id(topic)
+        return self.cache.get(topic_id)
+
+    def set(self, topic: Dict[str, Any], analysis: Dict[str, Any]):
+        """缓存帖子分析结果"""
+        topic_id = self.get_topic_id(topic)
+        self.cache[topic_id] = {
+            'topic': topic,
+            'analysis': analysis,
+            'cached_at': datetime.now().isoformat()
+        }
+        self._save_cache()
+
+    def is_cached(self, topic: Dict[str, Any]) -> bool:
+        """检查帖子是否已缓存"""
+        return self.get_topic_id(topic) in self.cache
 
 
 class LinuxDoAdapter(BaseAdapter):
@@ -128,6 +202,11 @@ class LinuxDoAdapter(BaseAdapter):
         else:
             # 创建一个禁用的 AI 分析器
             self.ai_analyzer = AIAnalyzer(api_key=None, logger=logger)
+
+        # 初始化缓存（性能优化）
+        cache_dir = PROJECT_ROOT / 'storage' / 'cache'
+        cache_file = cache_dir / f'linuxdo_{username}_topics.json'
+        self.cache = TopicCache(str(cache_file), cache_days=7)
 
     def _calculate_topic_score(self, topic: Dict[str, Any]) -> float:
         """
@@ -509,12 +588,12 @@ class LinuxDoAdapter(BaseAdapter):
         Linux.do 不需要签到，而是获取最新帖子和热门话题，并使用 AI 进行内容总结和推荐
         """
         try:
-            # 获取帖子（使用配置参数）
-            self.logger.info(f"获取最新帖子（{self.latest_limit} 条）...")
-            latest_topics_raw = await self.get_latest_topics(limit=self.latest_limit)
-
-            self.logger.info(f"获取热门帖子（{self.hot_limit} 条）...")
-            hot_topics_raw = await self.get_hot_topics(limit=self.hot_limit)
+            # 并发获取最新和热门帖子（性能优化）
+            self.logger.info(f"并发获取帖子列表...")
+            latest_topics_raw, hot_topics_raw = await asyncio.gather(
+                self.get_latest_topics(limit=self.latest_limit),
+                self.get_hot_topics(limit=self.hot_limit)
+            )
 
             # 应用内容过滤
             latest_topics = self._filter_quality_topics(latest_topics_raw)
@@ -523,30 +602,76 @@ class LinuxDoAdapter(BaseAdapter):
             self.logger.info(f"✓ 最新帖子: {len(latest_topics)} 个")
             self.logger.info(f"✓ 热门帖子: {len(hot_topics)} 个")
 
-            # 读取帖子内容（使用配置参数）
-            self.logger.info(f"读取热门帖子内容（{self.read_limit} 条）...")
-            topics_with_content = []
+            # 并发读取帖子内容（性能优化）
+            self.logger.info(f"并发读取帖子内容（{self.read_limit} 条）...")
             read_count = min(self.read_limit, len(hot_topics))
 
-            for i, topic in enumerate(hot_topics[:read_count], 1):
-                self.logger.debug(f"正在读取第 {i}/{read_count} 个热门帖子: {topic['title'][:30]}...")
-                content = await self.get_topic_content(topic['link'])
+            # 使用 asyncio.gather 并发获取
+            content_tasks = [
+                self.get_topic_content(topic['link'])
+                for topic in hot_topics[:read_count]
+            ]
+            contents = await asyncio.gather(*content_tasks, return_exceptions=True)
+
+            # 处理结果
+            topics_with_content = []
+            for i, (topic, content) in enumerate(zip(hot_topics[:read_count], contents)):
+                if isinstance(content, Exception):
+                    self.logger.warning(f"获取帖子内容失败: {topic['title'][:30]} - {str(content)}")
+                    continue
                 if content:
                     topic_with_content = topic.copy()
                     topic_with_content['content_summary'] = content
                     topics_with_content.append(topic_with_content)
-                await asyncio.sleep(1)
 
-            # 使用 AI 进行内容分析和总结（使用配置参数）
+            self.logger.info(f"✓ 成功读取 {len(topics_with_content)} 个帖子内容")
+
+            # 并发 AI 分析（性能优化 + 缓存）
             self.logger.info(f"AI 分析中（共 {self.ai_limit} 个帖子）...")
+            ai_analysis_tasks = []
+            ai_topics = []
+            cached_count = 0
             ai_summaries = []
-            for topic in topics_with_content[:self.ai_limit]:  # 使用配置的数量
+
+            for topic in topics_with_content[:self.ai_limit]:
+                # 检查缓存
+                cached_data = self.cache.get(topic)
+                if cached_data:
+                    # 使用缓存的分析结果
+                    topic['ai_summary'] = cached_data.get('analysis', {})
+                    ai_summaries.append(topic)
+                    cached_count += 1
+                    self.logger.debug(f"  ✓ [缓存] {topic['title'][:30]}")
+                    continue
+
+                # 需要新分析
                 content_text = topic.get('content_summary', {}).get('first_post', '')
                 if content_text and len(content_text) > 100:
-                    ai_result = await self.ai_analyzer.summarize_topic(topic, content_text)
+                    ai_analysis_tasks.append(
+                        self.ai_analyzer.summarize_topic(topic, content_text)
+                    )
+                    ai_topics.append(topic)
+
+            # 并发执行 AI 分析（仅对未缓存的帖子）
+            if ai_analysis_tasks:
+                self.logger.info(f"  需要分析 {len(ai_analysis_tasks)} 个新帖子（{cached_count} 个使用缓存）")
+                ai_results = await asyncio.gather(*ai_analysis_tasks, return_exceptions=True)
+
+                for topic, ai_result in zip(ai_topics, ai_results):
+                    if isinstance(ai_result, Exception):
+                        self.logger.warning(f"AI 分析失败: {topic['title'][:30]} - {str(ai_result)}")
+                        continue
+
                     topic['ai_summary'] = ai_result
                     ai_summaries.append(topic)
-                    self.logger.debug(f"  ✓ {topic['title'][:30]}")
+
+                    # 缓存分析结果
+                    self.cache.set(topic, ai_result)
+                    self.logger.debug(f"  ✓ [新分析] {topic['title'][:30]}")
+
+                self.logger.info(f"✓ AI 分析完成: {len(ai_summaries)} 个 (缓存命中 {cached_count}/{self.ai_limit})")
+            elif cached_count > 0:
+                self.logger.info(f"✓ 全部使用缓存: {cached_count} 个帖子")
 
             # 使用 AI 进行兴趣推荐
             self.logger.info("生成推荐列表...")
