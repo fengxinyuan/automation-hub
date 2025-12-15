@@ -20,13 +20,7 @@ class TopicCache:
     """帖子缓存管理器"""
 
     def __init__(self, cache_file: str, cache_days: int = 7):
-        """
-        初始化缓存管理器
-
-        Args:
-            cache_file: 缓存文件路径
-            cache_days: 缓存有效期（天）
-        """
+        """初始化缓存管理器"""
         self.cache_file = Path(cache_file)
         self.cache_days = cache_days
         self.cache: Dict[str, Dict[str, Any]] = {}
@@ -38,7 +32,6 @@ class TopicCache:
             try:
                 with open(self.cache_file, 'r', encoding='utf-8') as f:
                     self.cache = json.load(f)
-                # 清理过期缓存
                 self._clean_expired()
             except Exception:
                 self.cache = {}
@@ -585,15 +578,19 @@ class LinuxDoAdapter(BaseAdapter):
         """
         执行签到操作
 
-        Linux.do 不需要签到，而是获取最新帖子和热门话题，并使用 AI 进行内容总结和推荐
+        混合方案：串行获取列表 + 并发处理内容
+        - 串行：获取帖子列表（避免触发限制）
+        - 并发：读取帖子内容、AI分析（提速）
         """
         try:
-            # 并发获取最新和热门帖子（性能优化）
-            self.logger.info(f"并发获取帖子列表...")
-            latest_topics_raw, hot_topics_raw = await asyncio.gather(
-                self.get_latest_topics(limit=self.latest_limit),
-                self.get_hot_topics(limit=self.hot_limit)
-            )
+            # 串行获取帖子列表（避免触发限制）
+            self.logger.info(f"串行获取帖子列表...")
+            self.logger.info(f"  获取最新帖子（{self.latest_limit} 条）...")
+            latest_topics_raw = await self.get_latest_topics(limit=self.latest_limit)
+            await asyncio.sleep(0.5)  # 请求间隔
+
+            self.logger.info(f"  获取热门帖子（{self.hot_limit} 条）...")
+            hot_topics_raw = await self.get_hot_topics(limit=self.hot_limit)
 
             # 应用内容过滤
             latest_topics = self._filter_quality_topics(latest_topics_raw)
@@ -615,9 +612,9 @@ class LinuxDoAdapter(BaseAdapter):
 
             # 处理结果
             topics_with_content = []
-            for i, (topic, content) in enumerate(zip(hot_topics[:read_count], contents)):
+            for topic, content in zip(hot_topics[:read_count], contents):
                 if isinstance(content, Exception):
-                    self.logger.warning(f"获取帖子内容失败: {topic['title'][:30]} - {str(content)}")
+                    self.logger.warning(f"获取内容失败: {topic['title'][:30]}")
                     continue
                 if content:
                     topic_with_content = topic.copy()
@@ -626,7 +623,7 @@ class LinuxDoAdapter(BaseAdapter):
 
             self.logger.info(f"✓ 成功读取 {len(topics_with_content)} 个帖子内容")
 
-            # 并发 AI 分析（性能优化 + 缓存）
+            # 缓存+并发AI分析（性能优化）
             self.logger.info(f"AI 分析中（共 {self.ai_limit} 个帖子）...")
             ai_analysis_tasks = []
             ai_topics = []
@@ -659,7 +656,7 @@ class LinuxDoAdapter(BaseAdapter):
 
                 for topic, ai_result in zip(ai_topics, ai_results):
                     if isinstance(ai_result, Exception):
-                        self.logger.warning(f"AI 分析失败: {topic['title'][:30]} - {str(ai_result)}")
+                        self.logger.warning(f"AI分析失败: {topic['title'][:30]}")
                         continue
 
                     topic['ai_summary'] = ai_result
@@ -669,7 +666,7 @@ class LinuxDoAdapter(BaseAdapter):
                     self.cache.set(topic, ai_result)
                     self.logger.debug(f"  ✓ [新分析] {topic['title'][:30]}")
 
-                self.logger.info(f"✓ AI 分析完成: {len(ai_summaries)} 个 (缓存命中 {cached_count}/{self.ai_limit})")
+                self.logger.info(f"✓ AI分析完成: {len(ai_summaries)} 个 (缓存命中 {cached_count}/{self.ai_limit})")
             elif cached_count > 0:
                 self.logger.info(f"✓ 全部使用缓存: {cached_count} 个帖子")
 
