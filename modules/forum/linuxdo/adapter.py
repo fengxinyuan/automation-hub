@@ -462,25 +462,37 @@ class LinuxDoAdapter(BaseAdapter):
             await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
             await asyncio.sleep(2)
 
-            # 查找并点击登录按钮
+            # 查找并点击登录按钮 - 更新选择器以匹配 Discourse 论坛
             login_selectors = [
+                'button.login-button',  # Discourse 标准登录按钮
+                '.login-button',
+                'header .login-button',
                 'button:has-text("登录")',
                 'button:has-text("Login")',
-                '.login-button',
-                'header button.login-button'
+                'a.login-button',  # 有些论坛用 a 标签
+                '.d-header .login-button',
+                'button[aria-label*="登录"]',
+                'button[aria-label*="Login"]'
             ]
 
             login_clicked = False
             for selector in login_selectors:
                 try:
-                    element = await self.page.wait_for_selector(selector, timeout=5000, state='visible')
+                    # 先检查是否存在
+                    element = await self.page.query_selector(selector)
                     if element:
-                        self.logger.info(f"点击登录按钮: {selector}")
-                        await element.click()
-                        login_clicked = True
-                        await asyncio.sleep(2)  # 等待登录模态框显示
-                        break
-                except:
+                        # 确保元素可见
+                        is_visible = await element.is_visible()
+                        if is_visible:
+                            self.logger.info(f"找到登录按钮: {selector}")
+                            await element.click()
+                            login_clicked = True
+                            await asyncio.sleep(2)  # 等待登录模态框显示
+                            break
+                        else:
+                            self.logger.debug(f"登录按钮存在但不可见: {selector}")
+                except Exception as e:
+                    self.logger.debug(f"尝试选择器失败 {selector}: {str(e)}")
                     continue
 
             if not login_clicked:
