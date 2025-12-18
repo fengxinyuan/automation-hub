@@ -71,8 +71,7 @@ def _save_summary_to_file(results: Dict[str, List[Dict[str, Any]]], logger):
         # 生成可读的文本总结
         with open(output_file, 'w', encoding='utf-8') as f:
             f.write("=" * 80 + "\n")
-            f.write(f"Linux.do 论坛动态总结\n")
-            f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Linux.do 论坛动态 - {datetime.now().strftime('%Y-%m-%d')}\n")
             f.write("=" * 80 + "\n\n")
 
             for site_name, site_results in results.items():
@@ -141,7 +140,7 @@ async def run_linuxdo(
     logger = setup_logger('linuxdo', level=log_level_str)
 
     logger.info("=" * 60)
-    logger.info("Linux.do 论坛自动化开始")
+    logger.info(f"Linux.do 论坛动态 - {datetime.now().strftime('%Y-%m-%d')}")
     logger.info("=" * 60)
 
     if dry_run:
@@ -305,7 +304,7 @@ async def run_linuxdo(
                 await context.close()
 
                 if result.success:
-                    logger.info(f"✓ {username} - {result.message}")
+                    logger.info(f"✓ {username}")
                 else:
                     logger.error(f"✗ {username} - {result.message}")
 
@@ -334,7 +333,7 @@ async def run_linuxdo(
     failed = total - success
 
     logger.info("=" * 60)
-    logger.info(f"执行完成: 成功 {success}/{total}, 失败 {failed}")
+    logger.info(f"Linux.do 论坛动态获取完成")
     logger.info("=" * 60)
 
     # 保存总结到文件

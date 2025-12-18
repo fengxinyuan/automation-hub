@@ -11,6 +11,7 @@ import yaml
 from pathlib import Path
 from typing import List, Dict, Any
 from dotenv import load_dotenv
+from datetime import datetime
 
 # 添加项目根目录到路径
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -57,7 +58,7 @@ async def run_anyrouter(
     logger = setup_logger('anyrouter', level=log_level_str)
 
     logger.info("=" * 60)
-    logger.info("AnyRouter 自动签到开始")
+    logger.info(f"AnyRouter 自动签到 - {datetime.now().strftime('%Y-%m-%d')}")
     logger.info("=" * 60)
 
     if dry_run:
@@ -165,7 +166,7 @@ async def run_anyrouter(
     failed = total - success
 
     logger.info("=" * 60)
-    logger.info(f"签到完成: 成功 {success}/{total}, 失败 {failed}")
+    logger.info(f"AnyRouter 签到完成")
     logger.info("=" * 60)
 
     # 发送邮件通知
