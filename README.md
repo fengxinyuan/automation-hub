@@ -311,9 +311,14 @@ playwright install chromium
 
 - [ ] Web 管理界面
 - [ ] 插件市场
-- [ ] Docker 容器化
 - [ ] 更多模块支持
 - [ ] 监控告警系统
+
+## 🐳 关于 Docker
+
+⚠️ **Docker 支持已暂停维护** - 当前推荐使用 Cron 定时任务方式运行（更轻量、更高效）
+
+详见：[DOCKER_NOTE.md](DOCKER_NOTE.md)
 
 ---
 
