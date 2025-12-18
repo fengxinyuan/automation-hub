@@ -1,10 +1,35 @@
 """邮件通知模块"""
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.message import EmailMessage
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime
+
+
+def safe_quit(server: smtplib.SMTP) -> None:
+    """
+    QQ SMTP 在 QUIT 阶段偶尔会返回非 SMTP 文本数据（例如 b'\\x00\\x00\\x00'），
+    smtplib 会因此抛 SMTPResponseException。
+    发送已成功（queued）时，这类异常可以安全忽略。
+    """
+    try:
+        server.quit()
+    except smtplib.SMTPResponseException as e:
+        # 常见：(-1, b'\x00\x00\x00')，忽略即可
+        print(f"[提示] 忽略 QUIT 阶段异常：{e}")
+        try:
+            server.close()
+        except Exception:
+            pass
+    except Exception as e:
+        print(f"[提示] 退出阶段异常，直接关闭连接：{type(e).__name__}: {e}")
+        try:
+            server.close()
+        except Exception:
+            pass
 
 
 class EmailNotifier:
@@ -56,39 +81,76 @@ class EmailNotifier:
         Returns:
             是否发送成功
         """
+        # 创建邮件
+        msg = EmailMessage()
+        msg['From'] = self.username
+        msg['To'] = ', '.join(to_addresses)
+        msg['Subject'] = subject
+
+        # 添加正文
+        if html:
+            msg.set_content(body)
+            msg.add_alternative(body, subtype='html')
+        else:
+            msg.set_content(body)
+
+        # 优先尝试 SSL(465)，失败后尝试 STARTTLS(587)
+        # 这是根据 test.py 成功测试的方法
+        if self.smtp_port == 465:
+            # 先尝试 SSL
+            if self._send_with_ssl(msg, subject):
+                return True
+            # SSL 失败，尝试 STARTTLS
+            self.logger.warning("SSL(465) 发送失败，尝试 STARTTLS(587)")
+            return self._send_with_starttls(msg, subject)
+        elif self.smtp_port == 587:
+            # 直接使用 STARTTLS
+            return self._send_with_starttls(msg, subject)
+        else:
+            # 对于其他端口，尝试两种方式
+            if self._send_with_ssl(msg, subject):
+                return True
+            return self._send_with_starttls(msg, subject)
+
+    def _send_with_ssl(self, msg: EmailMessage, subject: str) -> bool:
+        """使用 SSL(465) 发送邮件"""
+        server = None
         try:
-            # 创建邮件
-            msg = MIMEMultipart('alternative')
-            msg['From'] = self.username
-            msg['To'] = ', '.join(to_addresses)
-            msg['Subject'] = subject
-
-            # 添加正文
-            if html:
-                msg.attach(MIMEText(body, 'html', 'utf-8'))
-            else:
-                msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-            # 连接 SMTP 服务器
-            if self.use_tls:
-                server = smtplib.SMTP(self.smtp_server, self.smtp_port)
-                server.starttls()
-            else:
-                server = smtplib.SMTP_SSL(self.smtp_server, self.smtp_port)
-
-            # 登录
+            ctx = ssl.create_default_context()
+            server = smtplib.SMTP_SSL(
+                self.smtp_server, 465, timeout=30, context=ctx
+            )
+            server.ehlo_or_helo_if_needed()
             server.login(self.username, self.password)
-
-            # 发送邮件
             server.send_message(msg)
-            server.quit()
-
-            self.logger.info(f"邮件发送成功: {subject}")
+            self.logger.info(f"邮件发送成功 [SSL(465)]: {subject}")
             return True
-
         except Exception as e:
-            self.logger.error(f"邮件发送失败: {str(e)}", exc_info=True)
+            self.logger.debug(f"SSL(465) 发送失败: {str(e)}")
             return False
+        finally:
+            if server is not None:
+                safe_quit(server)
+
+    def _send_with_starttls(self, msg: EmailMessage, subject: str) -> bool:
+        """使用 STARTTLS(587) 发送邮件"""
+        server = None
+        try:
+            ctx = ssl.create_default_context()
+            server = smtplib.SMTP(self.smtp_server, 587, timeout=30)
+            server.ehlo()
+            server.starttls(context=ctx)
+            server.ehlo()
+            server.login(self.username, self.password)
+            server.send_message(msg)
+            self.logger.info(f"邮件发送成功 [STARTTLS(587)]: {subject}")
+            return True
+        except Exception as e:
+            self.logger.error(f"STARTTLS(587) 发送失败: {str(e)}")
+            return False
+        finally:
+            if server is not None:
+                safe_quit(server)
 
     def send_checkin_report(
         self,

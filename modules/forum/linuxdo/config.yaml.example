@@ -115,15 +115,22 @@ notifications:
     level: INFO  # DEBUG, INFO, WARNING, ERROR
 
   # 邮件通知（推荐启用以接收论坛摘要）
+  # 支持 QQ 邮箱、Gmail、Outlook 等
   email:
-    enabled: false  # 设置为 true 以启用邮件通知
-    smtp_server: smtp.gmail.com
-    smtp_port: 587
-    use_tls: true
-    username: your-email@gmail.com
-    password: your-app-password  # Gmail 需使用应用专用密码
+    enabled: false  # 设置为 true 启用邮件通知
+    smtp_server: smtp.qq.com  # QQ邮箱: smtp.qq.com, Gmail: smtp.gmail.com
+    smtp_port: 465  # SSL 端口 465（推荐）或 STARTTLS 端口 587
+    use_tls: false  # 465端口使用false（SSL），587端口使用true（STARTTLS）
+    username: your_email@qq.com  # 发件邮箱
+    password: your_auth_code  # QQ邮箱授权码（不是QQ密码），获取方式见下方说明
     to_addresses:
-      - notify@example.com
+      - recipient@example.com  # 收件邮箱，可以多个
+
+# QQ 邮箱授权码获取方式：
+# 1. 登录 QQ 邮箱网页版 (mail.qq.com)
+# 2. 设置 -> 账户 -> POP3/IMAP/SMTP/Exchange/CardDAV/CalDAV服务
+# 3. 开启 POP3/SMTP 服务或 IMAP/SMTP 服务
+# 4. 生成授权码（16位字符）
 
 # 浏览器配置
 browser:
