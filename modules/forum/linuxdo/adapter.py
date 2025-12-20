@@ -655,13 +655,22 @@ class LinuxDoAdapter(BaseAdapter):
 
             self.logger.info(f"✓ 去重后总共: {len(all_topics)} 个帖子")
 
-            # 并发读取帖子内容（从高质量帖子中选择）
-            self.logger.info(f"并发读取帖子内容（{self.read_limit} 条）...")
+            # 使用限流的并发读取帖子内容（从高质量帖子中选择）
+            self.logger.info(f"并发读取帖子内容（{self.read_limit} 条，限流3并发）...")
             read_count = min(self.read_limit, len(all_topics))
+
+            # 使用信号量限制并发数，避免触发反爬
+            semaphore = asyncio.Semaphore(3)  # 最多3个并发请求
+
+            async def fetch_with_limit(topic):
+                async with semaphore:
+                    # 请求之间添加延迟
+                    await asyncio.sleep(0.5)
+                    return await self.get_topic_content(topic['link'])
 
             # 使用 asyncio.gather 并发获取
             content_tasks = [
-                self.get_topic_content(topic['link'])
+                fetch_with_limit(topic)
                 for topic in all_topics[:read_count]
             ]
             contents = await asyncio.gather(*content_tasks, return_exceptions=True)
@@ -672,12 +681,27 @@ class LinuxDoAdapter(BaseAdapter):
                 if isinstance(content, Exception):
                     self.logger.warning(f"获取内容失败: {topic['title'][:30]}")
                     continue
-                if content:
+                # 检查是否真的有内容（不是空字典或空内容）
+                if content and content.get('first_post', '').strip():
                     topic_with_content = topic.copy()
                     topic_with_content['content_summary'] = content
                     topics_with_content.append(topic_with_content)
 
-            self.logger.info(f"✓ 成功读取 {len(topics_with_content)} 个帖子内容")
+            self.logger.info(f"✓ 成功读取 {len(topics_with_content)} 个帖子内容（尝试 {read_count} 个）")
+
+            # 将带内容的帖子更新回 all_topics（通过链接匹配）
+            content_map = {t['link']: t for t in topics_with_content}
+            for i, topic in enumerate(all_topics):
+                if topic['link'] in content_map:
+                    all_topics[i] = content_map[topic['link']]
+
+            # 同时更新 latest_topics 和 hot_topics 中的内容
+            for i, topic in enumerate(latest_topics):
+                if topic['link'] in content_map:
+                    latest_topics[i] = content_map[topic['link']]
+            for i, topic in enumerate(hot_topics):
+                if topic['link'] in content_map:
+                    hot_topics[i] = content_map[topic['link']]
 
             # 缓存+并发AI分析（性能优化）
             self.logger.info(f"AI 分析中（共 {self.ai_limit} 个帖子）...")
@@ -1041,95 +1065,105 @@ class LinuxDoAdapter(BaseAdapter):
             self.logger.error(f"从分类 '{category_name}' 获取帖子失败: {str(e)}")
             return []
 
-    async def get_topic_content(self, topic_link: str) -> Dict[str, str]:
+    async def get_topic_content(self, topic_link: str, max_retries: int = 2) -> Dict[str, str]:
         """
-        获取帖子详细内容
+        获取帖子详细内容（带重试机制）
 
         Args:
             topic_link: 帖子链接（相对路径）
+            max_retries: 最大重试次数
 
         Returns:
             帖子内容摘要字典，包含：
             - first_post: 第一楼内容（截取前500字符）
             - key_points: 关键信息点列表
         """
-        try:
-            # 访问帖子页面
-            topic_url = f"{self.site_url}{topic_link}"
-            self.logger.debug(f"访问帖子: {topic_url}")
+        topic_url = f"{self.site_url}{topic_link}"
 
-            await self.page.goto(topic_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
-            await asyncio.sleep(2)
+        for attempt in range(max_retries + 1):
+            try:
+                # 访问帖子页面
+                self.logger.debug(f"访问帖子: {topic_url} (尝试 {attempt + 1}/{max_retries + 1})")
 
-            # 提取帖子内容
-            content_data = await self.page.evaluate("""
-                () => {
-                    // 获取第一楼内容
-                    const firstPost = document.querySelector('.topic-post:first-of-type .cooked, article.post:first-of-type .cooked');
-                    let firstPostText = '';
+                await self.page.goto(topic_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+                await asyncio.sleep(2)
 
-                    if (firstPost) {
-                        // 移除代码块和引用块，只保留主要文本
-                        const clone = firstPost.cloneNode(true);
+                # 提取帖子内容
+                content_data = await self.page.evaluate("""
+                    () => {
+                        // 获取第一楼内容
+                        const firstPost = document.querySelector('.topic-post:first-of-type .cooked, article.post:first-of-type .cooked');
+                        let firstPostText = '';
 
-                        // 移除代码块
-                        clone.querySelectorAll('pre, code').forEach(el => el.remove());
+                        if (firstPost) {
+                            // 移除代码块和引用块，只保留主要文本
+                            const clone = firstPost.cloneNode(true);
 
-                        // 移除引用
-                        clone.querySelectorAll('blockquote').forEach(el => el.remove());
+                            // 移除代码块
+                            clone.querySelectorAll('pre, code').forEach(el => el.remove());
 
-                        // 移除图片
-                        clone.querySelectorAll('img').forEach(el => el.remove());
+                            // 移除引用
+                            clone.querySelectorAll('blockquote').forEach(el => el.remove());
 
-                        firstPostText = clone.textContent.trim();
+                            // 移除图片
+                            clone.querySelectorAll('img').forEach(el => el.remove());
 
-                        // 截取前800字符
-                        if (firstPostText.length > 800) {
-                            firstPostText = firstPostText.substring(0, 800) + '...';
-                        }
-                    }
+                            firstPostText = clone.textContent.trim();
 
-                    // 尝试提取关键信息（列表项、加粗文本等）
-                    const keyPoints = [];
-                    if (firstPost) {
-                        // 提取列表项
-                        const listItems = firstPost.querySelectorAll('li');
-                        listItems.forEach((item, idx) => {
-                            if (idx < 3) {  // 只取前3个
-                                const text = item.textContent.trim();
-                                if (text.length < 100 && text.length > 10) {
-                                    keyPoints.push(text);
-                                }
+                            // 截取前800字符
+                            if (firstPostText.length > 800) {
+                                firstPostText = firstPostText.substring(0, 800) + '...';
                             }
-                        });
+                        }
 
-                        // 如果没有列表项，提取加粗文本
-                        if (keyPoints.length === 0) {
-                            const boldTexts = firstPost.querySelectorAll('strong, b');
-                            boldTexts.forEach((item, idx) => {
-                                if (idx < 3) {
+                        // 尝试提取关键信息（列表项、加粗文本等）
+                        const keyPoints = [];
+                        if (firstPost) {
+                            // 提取列表项
+                            const listItems = firstPost.querySelectorAll('li');
+                            listItems.forEach((item, idx) => {
+                                if (idx < 3) {  // 只取前3个
                                     const text = item.textContent.trim();
-                                    if (text.length < 100 && text.length > 5) {
+                                    if (text.length < 100 && text.length > 10) {
                                         keyPoints.push(text);
                                     }
                                 }
                             });
+
+                            // 如果没有列表项，提取加粗文本
+                            if (keyPoints.length === 0) {
+                                const boldTexts = firstPost.querySelectorAll('strong, b');
+                                boldTexts.forEach((item, idx) => {
+                                    if (idx < 3) {
+                                        const text = item.textContent.trim();
+                                        if (text.length < 100 && text.length > 5) {
+                                            keyPoints.push(text);
+                                        }
+                                    }
+                                });
+                            }
                         }
+
+                        return {
+                            first_post: firstPostText,
+                            key_points: keyPoints
+                        };
                     }
+                """)
 
-                    return {
-                        first_post: firstPostText,
-                        key_points: keyPoints
-                    };
-                }
-            """)
+                self.logger.debug(f"提取到内容长度: {len(content_data.get('first_post', ''))} 字符")
+                return content_data
 
-            self.logger.debug(f"提取到内容长度: {len(content_data.get('first_post', ''))} 字符")
-            return content_data
+            except Exception as e:
+                if attempt < max_retries:
+                    self.logger.debug(f"获取帖子内容失败 (尝试 {attempt + 1}/{max_retries + 1}): {str(e)}, 等待后重试...")
+                    await asyncio.sleep(2)  # 重试前等待2秒
+                else:
+                    self.logger.warning(f"获取帖子内容失败: {str(e)}")
+                    return {"first_post": "", "key_points": []}
 
-        except Exception as e:
-            self.logger.warning(f"获取帖子内容失败: {str(e)}")
-            return {"first_post": "", "key_points": []}
+        # 如果所有重试都失败（安全返回）
+        return {"first_post": "", "key_points": []}
 
     def _generate_summary(
         self,
