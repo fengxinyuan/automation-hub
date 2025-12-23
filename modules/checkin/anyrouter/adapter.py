@@ -1,6 +1,7 @@
 """AnyRouter 站点适配器"""
 import sys
 import re
+import random
 from pathlib import Path
 
 # 添加项目根目录到路径
@@ -21,7 +22,7 @@ class AnyrouterAdapter(BaseAdapter):
     PAGE_LOAD_TIMEOUT = 30000
     ELEMENT_WAIT_TIMEOUT = 10000  # 元素查找超时
 
-    def __init__(self, site_url: str, username: str, password: str, logger=None):
+    def __init__(self, site_url: str, username: str, password: str, logger=None, anti_detection_config: dict = None):
         super().__init__(
             site_name="anyrouter",
             site_url=site_url,
@@ -29,6 +30,23 @@ class AnyrouterAdapter(BaseAdapter):
             password=password,
             logger=logger
         )
+        # 防检测配置
+        self.anti_detection = anti_detection_config or {}
+        self.action_delay = self.anti_detection.get('action_delay', {'min': 1, 'max': 3})
+        self.typing_delay = self.anti_detection.get('typing_delay', {'min': 0.1, 'max': 0.3})
+
+    async def _random_delay(self, delay_config: dict = None):
+        """随机延迟（模拟人类行为）"""
+        if delay_config is None:
+            delay_config = self.action_delay
+        delay = random.uniform(delay_config['min'], delay_config['max'])
+        await asyncio.sleep(delay)
+
+    async def _human_type(self, element, text: str):
+        """模拟人类输入（逐字符输入）"""
+        for char in text:
+            await element.type(char)
+            await asyncio.sleep(random.uniform(self.typing_delay['min'], self.typing_delay['max']))
 
     async def _goto_with_retry(self, url: str, max_retries: int = 3, **kwargs):
         """
@@ -131,6 +149,9 @@ class AnyrouterAdapter(BaseAdapter):
             await self._goto_with_retry(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
             await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
 
+            # 随机延迟，模拟人类浏览
+            await self._random_delay()
+
             # 尝试关闭可能的弹窗/公告
             popup_close_selectors = [
                 'button:has-text("Close Notice")',
@@ -170,10 +191,12 @@ class AnyrouterAdapter(BaseAdapter):
                     element = await self.page.wait_for_selector(selector, timeout=3000, state='visible')
                     if element:
                         self.logger.info(f"点击登录按钮: {selector}")
+                        await self._random_delay()  # 点击前随机延迟
                         await element.click()
                         signin_clicked = True
                         # 等待页面跳转到登录页
                         await self.page.wait_for_load_state('domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+                        await self._random_delay()  # 页面加载后延迟
                         break
                 except:
                     continue
@@ -232,9 +255,15 @@ class AnyrouterAdapter(BaseAdapter):
                 try:
                     element = await self.page.wait_for_selector(selector, timeout=5000, state='visible')
                     if element:
-                        await element.fill(self.username)
+                        # 先清空输入框
+                        await element.click()
+                        await self._random_delay({'min': 0.3, 'max': 0.8})
+                        await element.fill('')
+                        # 使用人类行为模拟输入
+                        await self._human_type(element, self.username)
                         self.logger.debug(f"使用选择器填写用户名: {selector}")
                         username_filled = True
+                        await self._random_delay({'min': 0.5, 'max': 1.5})
                         break
                 except:
                     continue
@@ -257,9 +286,15 @@ class AnyrouterAdapter(BaseAdapter):
                 try:
                     element = await self.page.wait_for_selector(selector, timeout=5000, state='visible')
                     if element:
-                        await element.fill(self.password)
+                        # 先清空输入框
+                        await element.click()
+                        await self._random_delay({'min': 0.3, 'max': 0.8})
+                        await element.fill('')
+                        # 使用人类行为模拟输入
+                        await self._human_type(element, self.password)
                         self.logger.debug(f"使用选择器填写密码: {selector}")
                         password_filled = True
+                        await self._random_delay({'min': 0.5, 'max': 1.5})
                         break
                 except:
                     continue

@@ -95,9 +95,12 @@ async def run_anyrouter(
 
     # 并发配置
     concurrency_config = config.get('concurrency', {})
-    max_concurrent = concurrency_config.get('max_concurrent', 2)
-    delay_min = concurrency_config.get('delay_between_accounts', {}).get('min', 2)
-    delay_max = concurrency_config.get('delay_between_accounts', {}).get('max', 5)
+    max_concurrent = concurrency_config.get('max_concurrent', 1)
+    delay_min = concurrency_config.get('delay_between_accounts', {}).get('min', 5)
+    delay_max = concurrency_config.get('delay_between_accounts', {}).get('max', 10)
+
+    # 防检测配置
+    anti_detection_config = config.get('anti_detection', {})
 
     try:
         # 启动浏览器
@@ -113,12 +116,13 @@ async def run_anyrouter(
                 logger.warning(f"账号配置不完整，跳过: {username}")
                 continue
 
-            # 创建适配器
+            # 创建适配器（传递防检测配置）
             adapter = AnyrouterAdapter(
                 site_url=site_url,
                 username=username,
                 password=password,
-                logger=logger
+                logger=logger,
+                anti_detection_config=anti_detection_config
             )
 
             # 创建任务

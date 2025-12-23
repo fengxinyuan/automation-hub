@@ -39,9 +39,20 @@ browser:
   headless: true
   timeout: 30000  # 页面加载超时时间（毫秒）
 
-# 并发配置
+# 并发配置（防检测）
 concurrency:
-  max_concurrent: 2
+  max_concurrent: 1  # 串行运行，避免同时登录多个账号被检测
   delay_between_accounts:
-    min: 2  # 秒
-    max: 5  # 秒
+    min: 5  # 秒（账号之间最小间隔）
+    max: 10  # 秒（账号之间最大间隔）
+
+# 防检测配置
+anti_detection:
+  # 页面操作延迟（模拟人类行为）
+  action_delay:
+    min: 0.5  # 秒
+    max: 1.5  # 秒
+  # 输入延迟（每个字符）
+  typing_delay:
+    min: 0.05  # 秒
+    max: 0.15  # 秒
