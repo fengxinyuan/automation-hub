@@ -391,7 +391,12 @@ class LinuxDoAdapter(BaseAdapter):
         try:
             # 访问首页
             await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
-            await asyncio.sleep(2)  # 等待页面渲染
+
+            # 等待并检测 Cloudflare 验证
+            if await self._wait_for_cloudflare():
+                self.logger.info("Cloudflare 验证已通过")
+
+            await asyncio.sleep(3)  # 等待页面渲染
 
             # 检查 URL 是否在登录页
             current_url = self.page.url
@@ -446,6 +451,76 @@ class LinuxDoAdapter(BaseAdapter):
             self.logger.error(f"检查登录状态失败: {str(e)}")
             return False
 
+    async def _wait_for_cloudflare(self, timeout: int = 30) -> bool:
+        """
+        等待 Cloudflare 验证完成
+
+        Args:
+            timeout: 超时时间（秒）
+
+        Returns:
+            是否检测到并通过了 Cloudflare 验证
+        """
+        try:
+            # 检测 Cloudflare 验证页面的特征
+            cloudflare_indicators = [
+                'text=Verifying',
+                'text=Checking your browser',
+                'text=Just a moment',
+                '#challenge-running',
+                '.cf-browser-verification',
+                'div[class*="cloudflare"]'
+            ]
+
+            # 检查是否存在 Cloudflare 验证
+            cloudflare_detected = False
+            for indicator in cloudflare_indicators:
+                try:
+                    element = await self.page.query_selector(indicator)
+                    if element:
+                        cloudflare_detected = True
+                        self.logger.info(f"检测到 Cloudflare 验证: {indicator}")
+                        break
+                except:
+                    continue
+
+            if not cloudflare_detected:
+                return False
+
+            # 等待验证完成（验证元素消失）
+            self.logger.info(f"等待 Cloudflare 验证完成（最多 {timeout} 秒）...")
+            wait_time = 0
+            check_interval = 2
+
+            while wait_time < timeout:
+                await asyncio.sleep(check_interval)
+                wait_time += check_interval
+
+                # 检查验证元素是否还存在
+                still_verifying = False
+                for indicator in cloudflare_indicators:
+                    try:
+                        element = await self.page.query_selector(indicator)
+                        if element and await element.is_visible():
+                            still_verifying = True
+                            break
+                    except:
+                        continue
+
+                if not still_verifying:
+                    self.logger.info(f"Cloudflare 验证完成（耗时 {wait_time} 秒）")
+                    await asyncio.sleep(2)  # 额外等待页面稳定
+                    return True
+
+                self.logger.debug(f"仍在验证中... ({wait_time}/{timeout}s)")
+
+            self.logger.warning(f"Cloudflare 验证超时（{timeout} 秒）")
+            return False
+
+        except Exception as e:
+            self.logger.debug(f"Cloudflare 检测异常: {str(e)}")
+            return False
+
     async def login(self) -> bool:
         """
         执行登录操作
@@ -460,7 +535,12 @@ class LinuxDoAdapter(BaseAdapter):
             # 访问首页
             self.logger.info(f"访问首页: {self.site_url}")
             await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
-            await asyncio.sleep(2)
+
+            # 等待并检测 Cloudflare 验证
+            if await self._wait_for_cloudflare():
+                self.logger.info("Cloudflare 验证已通过")
+
+            await asyncio.sleep(3)  # 额外等待确保页面完全加载
 
             # 查找并点击登录按钮 - 更新选择器以匹配 Discourse 论坛
             login_selectors = [

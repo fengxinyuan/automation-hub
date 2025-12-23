@@ -1,26 +1,27 @@
 # Automation Hub - Cron Jobs Configuration
-# Generated on 2025-12-15
+# Updated on 2025-12-23
 
 # ==========================================
 # 1. Automation Hub 每日任务
 # ==========================================
-# 每天北京时间 9:00 AM 执行（UTC 01:00）
+# 每天北京时间 12:00 PM 执行（服务器时区：Asia/Shanghai CST +0800）
 # 包含：AnyRouter 签到 + Linux.do 论坛总结
-0 1 * * * /root/automation-hub/run_daily.sh >> /root/automation-hub/storage/logs/cron.log 2>&1
+0 12 * * * /root/automation-hub/run_daily.sh >> /root/automation-hub/storage/logs/cron.log 2>&1
 
 # ==========================================
 # 可选时间配置（注释掉的选项）
 # ==========================================
-# 每天北京时间 8:00 AM: 0 0 * * *
-# 每天北京时间 12:00 PM: 0 4 * * *
-# 每天北京时间 18:00 PM: 0 10 * * *
-# 每天北京时间 21:00 PM: 0 13 * * *
-# 每天两次（9:00 和 21:00）: 0 1,13 * * *
+# 每天北京时间 8:00 AM: 0 8 * * *
+# 每天北京时间 12:00 PM: 0 12 * * *
+# 每天北京时间 18:00 PM: 0 18 * * *
+# 每天北京时间 21:00 PM: 0 21 * * *
+# 每天两次（9:00 和 21:00）: 0 9,21 * * *
 
 # ==========================================
 # 说明
 # ==========================================
-# - 时区：服务器使用 UTC 时区
-# - 北京时间 = UTC + 8 小时
+# - 时区：服务器使用北京时间（Asia/Shanghai CST +0800）
+# - Cron 时间直接对应北京时间，无需转换
 # - 日志位置：/root/automation-hub/storage/logs/
 # - 修改后需要运行：crontab /root/automation-hub/crontab.txt
+# - 查看当前时区：timedatectl 或 date

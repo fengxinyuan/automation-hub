@@ -30,6 +30,47 @@ class AnyrouterAdapter(BaseAdapter):
             logger=logger
         )
 
+    async def _goto_with_retry(self, url: str, max_retries: int = 3, **kwargs):
+        """
+        带重试机制的页面跳转，处理 SSL 错误
+
+        Args:
+            url: 目标 URL
+            max_retries: 最大重试次数
+            **kwargs: 传递给 page.goto 的其他参数
+
+        Returns:
+            page.goto 的返回值
+
+        Raises:
+            最后一次重试失败的异常
+        """
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                return await self.page.goto(url, **kwargs)
+            except Exception as e:
+                error_str = str(e)
+                # 检查是否是 SSL 相关错误
+                is_ssl_error = any(err in error_str for err in [
+                    'ERR_SSL_VERSION_OR_CIPHER_MISMATCH',
+                    'ERR_SSL_PROTOCOL_ERROR',
+                    'ERR_CERT_',
+                    'SSL',
+                    'ERR_CONNECTION_CLOSED'
+                ])
+
+                if is_ssl_error and attempt < max_retries - 1:
+                    self.logger.warning(f"SSL 错误，第 {attempt + 1}/{max_retries} 次重试: {error_str}")
+                    await asyncio.sleep(2 * (attempt + 1))  # 递增等待时间
+                    continue
+                else:
+                    last_error = e
+                    break
+
+        if last_error:
+            raise last_error
+
     async def is_logged_in(self) -> bool:
         """
         检查是否已登录
@@ -39,7 +80,7 @@ class AnyrouterAdapter(BaseAdapter):
         try:
             # 直接访问控制台页面（需要登录才能访问）
             console_url = f"{self.site_url}/console"
-            await self.page.goto(console_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await self._goto_with_retry(console_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
 
             # 等待页面稳定
             await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
@@ -87,7 +128,7 @@ class AnyrouterAdapter(BaseAdapter):
         try:
             # 先访问首页
             self.logger.info(f"访问首页: {self.site_url}")
-            await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await self._goto_with_retry(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
             await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
 
             # 尝试关闭可能的弹窗/公告
@@ -144,7 +185,7 @@ class AnyrouterAdapter(BaseAdapter):
                 for path in login_paths:
                     try:
                         login_url = f"{self.site_url}{path}"
-                        await self.page.goto(login_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+                        await self._goto_with_retry(login_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
                         await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
                         # 检查是否是404
                         page_content = await self.page.content()
@@ -292,7 +333,7 @@ class AnyrouterAdapter(BaseAdapter):
             # 访问控制台页面
             console_url = f"{self.site_url}/console"
             self.logger.info(f"访问控制台: {console_url}")
-            await self.page.goto(console_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+            await self._goto_with_retry(console_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
             await self.page.wait_for_load_state('networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
 
             await self.take_screenshot("console_page")

@@ -246,7 +246,22 @@ python3 scripts/clean_logs.py --dry-run
 
 ## ⏰ 定时任务
 
-使用 cron 设置定时执行：
+### 方式 1：使用提供的 crontab 配置（推荐）
+
+项目提供了预配置的定时任务文件：
+
+```bash
+# 应用 crontab 配置（每天北京时间 12:00 执行）
+crontab /root/automation-hub/crontab.txt
+
+# 查看当前任务
+crontab -l
+
+# 查看执行日志
+tail -f /root/automation-hub/storage/logs/cron.log
+```
+
+### 方式 2：自定义 cron 任务
 
 ```bash
 crontab -e
@@ -258,6 +273,8 @@ crontab -e
 0 9 * * * cd /path/to/automation-hub && python3 modules/forum/linuxdo/run.py >> logs/forum/linuxdo.log 2>&1
 ```
 
+**注意**：服务器使用北京时间（Asia/Shanghai CST +0800），cron 时间直接对应北京时间。
+
 ---
 
 ## 📚 文档
@@ -266,29 +283,44 @@ crontab -e
 - [模块开发指南](docs/MODULE_DEVELOPMENT.md)
 - [功能拆分指南](PROJECT_SPLIT_GUIDE.md)
 - [Linux.do AI 功能指南](AI_FEATURE_GUIDE.md)
+- [修复记录](FIXES.md)
 
 ---
 
 ## 🔧 故障排查
 
-### 问题 1：模块运行失败
+### 问题 1：Linux.do 登录失败（Cloudflare 验证）
+
+- **现象**：卡在 "Verifying..." 页面
+- **解决**：已集成自动等待机制，最多等待 30 秒
+- **检查**：查看日志是否显示 "Cloudflare 验证已通过"
+
+### 问题 2：AnyRouter SSL 错误
+
+- **现象**：ERR_SSL_VERSION_OR_CIPHER_MISMATCH
+- **解决**：已添加自动重试机制（最多 3 次）
+- **原因**：网站临时 SSL 配置问题，通常重试即可成功
+
+### 问题 3：模块运行失败
 
 - 检查配置文件是否正确
 - 使用 `--debug` 模式查看详细日志
 - 确认依赖已安装
 
-### 问题 2：AI 功能未启用
+### 问题 4：AI 功能未启用
 
 - 检查 `.env` 文件中的 `DASHSCOPE_API_KEY`
 - 确认模块配置中 `ai.enabled: true`
 - 检查 API Key 是否有效
 
-### 问题 3：浏览器启动失败
+### 问题 5：浏览器启动失败
 
 ```bash
 # 重新安装 Playwright 浏览器
 playwright install chromium
 ```
+
+更多修复记录请查看：[FIXES.md](FIXES.md)
 
 ---
 
