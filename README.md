@@ -281,70 +281,29 @@ crontab -e
 
 - [项目架构说明](ARCHITECTURE_REFACTOR.md)
 - [模块开发指南](docs/MODULE_DEVELOPMENT.md)
-- [功能拆分指南](PROJECT_SPLIT_GUIDE.md)
 - [Linux.do AI 功能指南](AI_FEATURE_GUIDE.md)
-- [修复记录](FIXES.md)
 
 ---
 
 ## 🔧 故障排查
 
-### 问题 1：Linux.do 登录失败（Cloudflare 验证）
+### 常见问题
 
-- **现象**：卡在 "Verifying..." 页面
-- **解决**：已集成自动等待机制，最多等待 30 秒
-- **检查**：查看日志是否显示 "Cloudflare 验证已通过"
-
-### 问题 2：AnyRouter SSL 错误
-
-- **现象**：ERR_SSL_VERSION_OR_CIPHER_MISMATCH
-- **解决**：已添加自动重试机制（最多 3 次）
-- **原因**：网站临时 SSL 配置问题，通常重试即可成功
-
-### 问题 3：模块运行失败
-
-- 检查配置文件是否正确
-- 使用 `--debug` 模式查看详细日志
-- 确认依赖已安装
-
-### 问题 4：AI 功能未启用
-
-- 检查 `.env` 文件中的 `DASHSCOPE_API_KEY`
-- 确认模块配置中 `ai.enabled: true`
-- 检查 API Key 是否有效
-
-### 问题 5：浏览器启动失败
-
+**浏览器启动失败**
 ```bash
-# 重新安装 Playwright 浏览器
 playwright install chromium
 ```
 
-更多修复记录请查看：[FIXES.md](FIXES.md)
+**模块运行失败**
+- 检查配置文件：`python3 scripts/check_config.py`
+- 使用 `--debug` 查看详细日志
+- 确认依赖已安装：`pip install -r requirements.txt`
+
+**AI 功能未生效**
+- 检查 `.env` 中的 API Key
+- 确认配置文件 `ai.enabled: true`
 
 ---
-
-## 📈 特性对比
-
-### vs 旧版架构
-
-| 特性 | 旧版 | 新版（Automation Hub） |
-|------|-----|----------------------|
-| 架构设计 | 耦合 | ✅ 完全模块化 |
-| 扩展性 | ⚠️ 中等 | ✅ 极强 |
-| 代码组织 | ⚠️ 分散 | ✅ 清晰分类 |
-| 添加新功能 | ⚠️ 手动 | ✅ 自动生成 |
-| 批量运行 | ❌ 不支持 | ✅ 统一脚本 |
-| 模块独立性 | ✅ 较好 | ✅ 完美 |
-
----
-
-## 🎯 未来计划
-
-- [ ] Web 管理界面
-- [ ] 插件市场
-- [ ] 更多模块支持
-- [ ] 监控告警系统
 
 ## 🐳 关于 Docker
 
