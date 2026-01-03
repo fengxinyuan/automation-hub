@@ -1,5 +1,6 @@
 """浏览器管理模块"""
 import asyncio
+import os
 from pathlib import Path
 from typing import Optional
 from playwright.async_api import async_playwright, Browser, BrowserContext, Playwright
@@ -22,6 +23,30 @@ class BrowserManager:
         self.playwright: Optional[Playwright] = None
         self.browser: Optional[Browser] = None
 
+        # 自动检测代理配置
+        self.proxy = self._detect_proxy()
+
+    def _detect_proxy(self) -> Optional[dict]:
+        """
+        自动检测系统代理配置
+
+        优先级：HTTP_PROXY > HTTPS_PROXY > http_proxy > https_proxy
+
+        Returns:
+            代理配置字典或 None
+        """
+        proxy_url = (
+            os.getenv('HTTP_PROXY') or
+            os.getenv('HTTPS_PROXY') or
+            os.getenv('http_proxy') or
+            os.getenv('https_proxy')
+        )
+
+        if proxy_url:
+            print(f"[BrowserManager] 检测到代理: {proxy_url}")
+            return {"server": proxy_url}
+        return None
+
     async def __aenter__(self):
         """异步上下文管理器入口"""
         await self.start()
@@ -34,9 +59,11 @@ class BrowserManager:
     async def start(self):
         """启动浏览器"""
         self.playwright = await async_playwright().start()
-        self.browser = await self.playwright.chromium.launch(
-            headless=self.headless,
-            args=[
+
+        # 浏览器启动参数
+        launch_options = {
+            "headless": self.headless,
+            "args": [
                 '--disable-blink-features=AutomationControlled',
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
@@ -45,7 +72,14 @@ class BrowserManager:
                 '--disable-features=IsolateOrigins,site-per-process',
                 '--disable-site-isolation-trials'
             ]
-        )
+        }
+
+        # 如果有代理配置，添加代理
+        if self.proxy:
+            launch_options["proxy"] = self.proxy
+            print(f"[BrowserManager] 使用代理: {self.proxy['server']}")
+
+        self.browser = await self.playwright.chromium.launch(**launch_options)
 
     async def create_context(
         self, site_name: str, user_id: str, load_session: bool = True

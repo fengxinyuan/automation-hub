@@ -682,46 +682,38 @@ class LinuxDoAdapter(BaseAdapter):
         """
         执行签到操作
 
-        混合方案：串行获取列表 + 并发处理内容
-        - 串行：获取帖子列表（避免触发限制）
-        - 并发：读取帖子内容、AI分析（提速）
+        优化方案：
+        - 串行获取帖子列表（避免触发限制）
+        - 并发读取内容和 AI 分析（提速）
+        - 使用缓存减少重复分析
         """
         try:
-            # 串行获取帖子列表（避免触发限制）
-            self.logger.info(f"串行获取帖子列表...")
-            self.logger.info(f"  获取最新帖子（{self.latest_limit} 条）...")
+            # 串行获取帖子列表
+            self.logger.info(f"获取帖子列表...")
             latest_topics_raw = await self.get_latest_topics(limit=self.latest_limit)
-            await asyncio.sleep(0.5)  # 请求间隔
+            await asyncio.sleep(0.3)  # 减少请求间隔
 
-            self.logger.info(f"  获取热门帖子（{self.hot_limit} 条）...")
             hot_topics_raw = await self.get_hot_topics(limit=self.hot_limit)
-            await asyncio.sleep(0.5)  # 请求间隔
+            await asyncio.sleep(0.3)
 
-            # 如果启用了优先分类获取，从关注的分类中获取更多帖子
+            # 如果启用了优先分类获取
             category_topics_raw = []
             if self.fetch_priority_categories and self.priority_categories:
-                self.logger.info(f"  从优先分类获取帖子...")
-                for category in list(self.priority_categories)[:2]:  # 限制最多2个分类，避免请求过多
+                self.logger.info(f"获取优先分类帖子...")
+                for category in list(self.priority_categories)[:2]:
                     try:
-                        topics = await self.get_category_topics(category, limit=20)
+                        topics = await self.get_category_topics(category, limit=15)
                         category_topics_raw.extend(topics)
-                        await asyncio.sleep(0.5)  # 请求间隔
+                        await asyncio.sleep(0.3)
                     except Exception as e:
-                        self.logger.warning(f"从分类 '{category}' 获取失败: {str(e)}")
-
-                self.logger.info(f"  从优先分类获取到 {len(category_topics_raw)} 个帖子")
+                        self.logger.debug(f"分类 '{category}' 获取失败: {str(e)}")
 
             # 应用内容过滤
             latest_topics = self._filter_quality_topics(latest_topics_raw)
             hot_topics = self._filter_quality_topics(hot_topics_raw)
             category_topics = self._filter_quality_topics(category_topics_raw) if category_topics_raw else []
 
-            self.logger.info(f"✓ 最新帖子: {len(latest_topics)} 个")
-            self.logger.info(f"✓ 热门帖子: {len(hot_topics)} 个")
-            if category_topics:
-                self.logger.info(f"✓ 分类帖子: {len(category_topics)} 个")
-
-            # 合并所有帖子并去重
+            # 合并并去重
             all_topics_raw = latest_topics + hot_topics + category_topics
             seen = set()
             all_topics = []
@@ -730,44 +722,36 @@ class LinuxDoAdapter(BaseAdapter):
                     seen.add(t['link'])
                     all_topics.append(t)
 
-            # 按评分重新排序（最高质量的在前）
+            # 按评分排序
             all_topics.sort(key=lambda t: t.get('quality_score', 0), reverse=True)
+            self.logger.info(f"去重后共 {len(all_topics)} 个帖子")
 
-            self.logger.info(f"✓ 去重后总共: {len(all_topics)} 个帖子")
-
-            # 使用限流的并发读取帖子内容（从高质量帖子中选择）
-            self.logger.info(f"并发读取帖子内容（{self.read_limit} 条，限流3并发）...")
+            # 并发读取帖子内容（限流避免触发反爬）
+            self.logger.info(f"读取帖子内容（{self.read_limit} 条）...")
             read_count = min(self.read_limit, len(all_topics))
-
-            # 使用信号量限制并发数，避免触发反爬
-            semaphore = asyncio.Semaphore(3)  # 最多3个并发请求
+            semaphore = asyncio.Semaphore(3)  # 最多3个并发
 
             async def fetch_with_limit(topic):
                 async with semaphore:
-                    # 请求之间添加延迟
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(0.3)  # 减少延迟
                     return await self.get_topic_content(topic['link'])
 
             # 使用 asyncio.gather 并发获取
-            content_tasks = [
-                fetch_with_limit(topic)
-                for topic in all_topics[:read_count]
-            ]
+            content_tasks = [fetch_with_limit(topic) for topic in all_topics[:read_count]]
             contents = await asyncio.gather(*content_tasks, return_exceptions=True)
 
             # 处理结果
             topics_with_content = []
             for topic, content in zip(all_topics[:read_count], contents):
                 if isinstance(content, Exception):
-                    self.logger.warning(f"获取内容失败: {topic['title'][:30]}")
+                    self.logger.debug(f"内容获取失败: {topic['title'][:30]}")
                     continue
-                # 检查是否真的有内容（不是空字典或空内容）
                 if content and content.get('first_post', '').strip():
                     topic_with_content = topic.copy()
                     topic_with_content['content_summary'] = content
                     topics_with_content.append(topic_with_content)
 
-            self.logger.info(f"✓ 成功读取 {len(topics_with_content)} 个帖子内容（尝试 {read_count} 个）")
+            self.logger.info(f"成功读取 {len(topics_with_content)} 个帖子内容")
 
             # 将带内容的帖子更新回 all_topics（通过链接匹配）
             content_map = {t['link']: t for t in topics_with_content}
@@ -783,63 +767,49 @@ class LinuxDoAdapter(BaseAdapter):
                 if topic['link'] in content_map:
                     hot_topics[i] = content_map[topic['link']]
 
-            # 缓存+并发AI分析（性能优化）
-            self.logger.info(f"AI 分析中（共 {self.ai_limit} 个帖子）...")
-            ai_analysis_tasks = []
-            ai_topics = []
-            cached_count = 0
+            # 缓存+并发AI分析
+            self.logger.info(f"AI 分析（{self.ai_limit} 个帖子）...")
             ai_summaries = []
+            cached_count = 0
 
+            # 分离缓存和需要分析的帖子
+            to_analyze = []
             for topic in topics_with_content[:self.ai_limit]:
-                # 检查缓存
                 cached_data = self.cache.get(topic)
                 if cached_data:
-                    # 使用缓存的分析结果
                     topic['ai_summary'] = cached_data.get('analysis', {})
                     ai_summaries.append(topic)
                     cached_count += 1
-                    self.logger.debug(f"  ✓ [缓存] {topic['title'][:30]}")
-                    continue
+                else:
+                    content_text = topic.get('content_summary', {}).get('first_post', '')
+                    if content_text and len(content_text) > 100:
+                        to_analyze.append(topic)
 
-                # 需要新分析
-                content_text = topic.get('content_summary', {}).get('first_post', '')
-                if content_text and len(content_text) > 100:
-                    ai_analysis_tasks.append(
-                        self.ai_analyzer.summarize_topic(topic, content_text)
+            # 并发分析未缓存的帖子
+            if to_analyze:
+                self.logger.info(f"分析 {len(to_analyze)} 个新帖子（{cached_count} 个使用缓存）")
+                analysis_tasks = [
+                    self.ai_analyzer.summarize_topic(
+                        topic,
+                        topic.get('content_summary', {}).get('first_post', '')
                     )
-                    ai_topics.append(topic)
+                    for topic in to_analyze
+                ]
+                ai_results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
 
-            # 并发执行 AI 分析（仅对未缓存的帖子）
-            if ai_analysis_tasks:
-                self.logger.info(f"  需要分析 {len(ai_analysis_tasks)} 个新帖子（{cached_count} 个使用缓存）")
-                ai_results = await asyncio.gather(*ai_analysis_tasks, return_exceptions=True)
+                for topic, ai_result in zip(to_analyze, ai_results):
+                    if not isinstance(ai_result, Exception):
+                        topic['ai_summary'] = ai_result
+                        ai_summaries.append(topic)
+                        self.cache.set(topic, ai_result)
 
-                for topic, ai_result in zip(ai_topics, ai_results):
-                    if isinstance(ai_result, Exception):
-                        self.logger.warning(f"AI分析失败: {topic['title'][:30]}")
-                        continue
-
-                    topic['ai_summary'] = ai_result
-                    ai_summaries.append(topic)
-
-                    # 缓存分析结果
-                    self.cache.set(topic, ai_result)
-                    self.logger.debug(f"  ✓ [新分析] {topic['title'][:30]}")
-
-                self.logger.info(f"✓ AI分析完成: {len(ai_summaries)} 个 (缓存命中 {cached_count}/{self.ai_limit})")
+                self.logger.info(f"AI分析完成: {len(ai_summaries)} 个")
             elif cached_count > 0:
-                self.logger.info(f"✓ 全部使用缓存: {cached_count} 个帖子")
+                self.logger.info(f"全部使用缓存: {cached_count} 个帖子")
 
-            # 使用 AI 进行兴趣推荐
+            # 使用 AI 生成推荐列表
             self.logger.info("生成推荐列表...")
-
-            # 构建用户画像（如果配置了）
-            user_profile = None
-            if self.user_interests:
-                user_profile = {
-                    'interests': self.user_interests
-                }
-
+            user_profile = {'interests': self.user_interests} if self.user_interests else None
             recommended_topics = await self.ai_analyzer.analyze_interests(
                 topics=all_topics,
                 user_profile=user_profile
@@ -1165,8 +1135,22 @@ class LinuxDoAdapter(BaseAdapter):
                 # 访问帖子页面
                 self.logger.debug(f"访问帖子: {topic_url} (尝试 {attempt + 1}/{max_retries + 1})")
 
-                await self.page.goto(topic_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
-                await asyncio.sleep(2)
+                # 使用 networkidle 等待策略，确保页面完全加载
+                await self.page.goto(
+                    topic_url,
+                    wait_until='domcontentloaded',
+                    timeout=self.PAGE_LOAD_TIMEOUT
+                )
+
+                # 增加等待时间，确保页面稳定
+                await asyncio.sleep(3)
+
+                # 检查是否发生了重定向
+                current_url = self.page.url
+                if topic_url not in current_url and topic_link not in current_url:
+                    self.logger.debug(f"检测到重定向: {topic_url} -> {current_url}")
+                    # 如果重定向了，再等待一下
+                    await asyncio.sleep(2)
 
                 # 提取帖子内容
                 content_data = await self.page.evaluate("""
@@ -1231,15 +1215,26 @@ class LinuxDoAdapter(BaseAdapter):
                     }
                 """)
 
-                self.logger.debug(f"提取到内容长度: {len(content_data.get('first_post', ''))} 字符")
-                return content_data
+                # 验证内容是否有效
+                if content_data.get('first_post', '').strip():
+                    self.logger.debug(f"成功提取内容: {len(content_data.get('first_post', ''))} 字符")
+                    return content_data
+                else:
+                    # 内容为空，可能是页面未加载完成
+                    if attempt < max_retries:
+                        self.logger.debug(f"内容为空，等待后重试...")
+                        await asyncio.sleep(3)
+                        continue
+                    else:
+                        self.logger.debug(f"内容为空，返回空结果")
+                        return {"first_post": "", "key_points": []}
 
             except Exception as e:
                 if attempt < max_retries:
-                    self.logger.debug(f"获取帖子内容失败 (尝试 {attempt + 1}/{max_retries + 1}): {str(e)}, 等待后重试...")
-                    await asyncio.sleep(2)  # 重试前等待2秒
+                    self.logger.debug(f"获取失败 (尝试 {attempt + 1}/{max_retries + 1}): {str(e)[:100]}, 等待后重试...")
+                    await asyncio.sleep(3)  # 重试前等待
                 else:
-                    self.logger.warning(f"获取帖子内容失败: {str(e)}")
+                    self.logger.debug(f"获取帖子内容失败: {str(e)[:100]}")
                     return {"first_post": "", "key_points": []}
 
         # 如果所有重试都失败（安全返回）
