@@ -12,8 +12,7 @@ ENV/
 .env
 
 # 日志和临时文件
-logs/*.log
-logs/*.png
+logs/
 *.log
 
 # 浏览器会话（包含登录信息）
@@ -40,3 +39,10 @@ modules/**/config.yaml
 # 系统文件
 .DS_Store
 Thumbs.db
+
+# Claude Code 工作目录
+.claude/
+
+# 临时文件
+*.tmp
+*_test.yaml

@@ -16,7 +16,7 @@
 | 模块 | 类型 | 功能 | AI 支持 |
 |------|------|------|---------|
 | **anyrouter** | 签到类 | AnyRouter 路由器服务自动签到 | ❌ |
-| **linuxdo** | 论坛类 | Linux.do 论坛内容获取 + AI 智能分析 | ✅ qwen-flash |
+| **linuxdo** | 论坛类 | Linux.do 论坛智能内容获取 + AI 分析推荐 | ✅ qwen-flash |
 
 ### 🔜 待扩展模块
 
@@ -127,6 +127,13 @@ site:
       password: your-password
       enabled: true
 
+# 内容获取配置
+content:
+  latest_topics_limit: 20  # 最新帖子数量
+  hot_topics_limit: 10     # 热门帖子数量
+  read_content_limit: 5    # 深度阅读数量
+  ai_analysis_limit: 3     # AI 分析数量
+
 # AI 配置（可选）
 ai:
   enabled: true
@@ -160,10 +167,11 @@ python3 scripts/module_generator.py --name 模块名 --type checkin|forum|game
 ### 支持的模块
 
 当前 **linuxdo** 模块支持 AI 智能分析：
-- AI 内容总结
-- AI 智能推荐
-- 关键信息提取
-- 情感分析
+- 📝 AI 内容摘要 - 自动总结帖子核心内容
+- 🎯 智能推荐 - 基于用户兴趣的个性化推荐
+- 🔑 关键信息提取 - 提取帖子要点和标签
+- 💭 情感分析 - 分析内容情感倾向
+- 📊 综合评分 - 基于热度、互动率、分类和兴趣的智能评分
 
 ### AI 模型
 
