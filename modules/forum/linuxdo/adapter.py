@@ -443,9 +443,9 @@ class LinuxDoAdapter(BaseAdapter):
                 self.logger.debug("页面内容检测到登录状态")
                 return True
 
-            # 如果都没检测到，假设已登录（因为有会话恢复）
-            self.logger.debug("无明确登录标识，假设已登录")
-            return True
+            # 如果都没检测到，返回未登录
+            self.logger.debug("未检测到登录标识，需要登录")
+            return False
 
         except Exception as e:
             self.logger.error(f"检查登录状态失败: {str(e)}")
