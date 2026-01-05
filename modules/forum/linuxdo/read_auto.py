@@ -100,7 +100,7 @@ async def auto_read(username: str, password: str, site_url: str = "https://linux
         site_url: 站点URL
     """
     # 设置日志
-    logger = setup_logger('linuxdo_auto_read', level='INFO')
+    logger = setup_logger('linuxdo_auto_read', level='DEBUG')
 
     # 初始化已读历史
     read_history = ReadHistory(username, cache_days=7)
@@ -121,8 +121,29 @@ async def auto_read(username: str, password: str, site_url: str = "https://linux
     try:
         await browser_manager.start()
 
-        # 创建浏览器上下文
-        context = await browser_manager.create_context('linuxdo', username)
+        # 尝试从 cookies.json 恢复会话（如果会话不存在）
+        cookies_file = PROJECT_ROOT / 'modules' / 'forum' / 'linuxdo' / 'cookies.json'
+        session_dir = PROJECT_ROOT / 'storage' / 'sessions' / f'linuxdo_{username}'
+        state_file = session_dir / 'state.json'
+
+        if cookies_file.exists() and not state_file.exists():
+            logger.info("发现 cookies 配置但无会话文件，创建会话...")
+            try:
+                session_dir.mkdir(parents=True, exist_ok=True)
+                with open(cookies_file, 'r', encoding='utf-8') as f:
+                    cookies_data = json.load(f)
+                # 写入 state.json
+                with open(state_file, 'w', encoding='utf-8') as f:
+                    json.dump({
+                        'cookies': cookies_data.get('cookies', []),
+                        'origins': []
+                    }, f, ensure_ascii=False, indent=2)
+                logger.info(f"成功创建会话文件: {state_file}")
+            except Exception as e:
+                logger.warning(f"创建会话失败: {e}")
+
+        # 创建浏览器上下文（会自动加载 state.json）
+        context = await browser_manager.create_context('linuxdo', username, load_session=True)
 
         # 创建适配器（简化配置，只做阅读）
         adapter = LinuxDoAdapter(

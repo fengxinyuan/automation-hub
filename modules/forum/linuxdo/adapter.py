@@ -451,6 +451,45 @@ class LinuxDoAdapter(BaseAdapter):
             self.logger.error(f"检查登录状态失败: {str(e)}")
             return False
 
+    async def load_and_inject_cookies(self) -> bool:
+        """
+        从配置文件加载并注入 cookies
+
+        Returns:
+            bool: 是否成功加载并注入 cookies
+        """
+        try:
+            cookies_file = PROJECT_ROOT / 'modules' / 'forum' / 'linuxdo' / 'cookies.json'
+
+            if not cookies_file.exists():
+                self.logger.debug("未找到 cookies 配置文件")
+                return False
+
+            with open(cookies_file, 'r', encoding='utf-8') as f:
+                cookies_data = json.load(f)
+
+            cookies = cookies_data.get('cookies', [])
+            if not cookies:
+                self.logger.warning("cookies 配置文件为空")
+                return False
+
+            # 检查是否有登录 token
+            has_auth_token = any(c.get('name') == '_t' for c in cookies)
+
+            if not has_auth_token:
+                self.logger.warning("cookies 中未找到登录 token (_t)")
+                return False
+
+            # 注入 cookies 到当前 context
+            await self.context.add_cookies(cookies)
+
+            self.logger.info(f"成功注入 {len(cookies)} 个 cookies（包含登录 token）")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"加载 cookies 失败: {str(e)}")
+            return False
+
     async def _wait_for_cloudflare(self, timeout: int = 30) -> bool:
         """
         等待 Cloudflare 验证完成
@@ -525,13 +564,60 @@ class LinuxDoAdapter(BaseAdapter):
         """
         执行登录操作
 
-        Discourse 论坛的登录流程：
-        1. 点击登录按钮
-        2. 填写用户名/邮箱
-        3. 填写密码
-        4. 点击登录
+        优先尝试使用保存的 cookies 登录
+        如果 cookies 无效，则执行常规登录流程
         """
         try:
+            # 优先尝试使用 cookies 登录
+            cookies_file = PROJECT_ROOT / 'modules' / 'forum' / 'linuxdo' / 'cookies.json'
+
+            if cookies_file.exists():
+                self.logger.info("尝试使用保存的 cookies 登录...")
+
+                # 先访问首页（创建基础会话）
+                await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)
+                await asyncio.sleep(2)
+
+                # 然后注入 cookies
+                cookies_loaded = await self.load_and_inject_cookies()
+
+                if cookies_loaded:
+                    # 刷新页面让 cookies 生效
+                    await self.page.reload(wait_until='networkidle', timeout=self.PAGE_LOAD_TIMEOUT)
+
+                    # 等待 Cloudflare 验证
+                    if await self._wait_for_cloudflare():
+                        self.logger.debug("Cloudflare 验证已通过")
+
+                    # 等待页面完全加载（等待body元素出现）
+                    try:
+                        await self.page.wait_for_selector('body', state='attached', timeout=10000)
+                        await asyncio.sleep(5)  # 额外等待确保JS执行完成
+                    except:
+                        pass
+
+                    # 检查登录状态
+                    # 直接检查页面内容，不再调用 is_logged_in()（避免重复 goto）
+                    page_content = await self.page.content()
+
+                    # 详细日志
+                    has_current_user = 'current-user' in page_content
+                    has_user_menu = 'user-menu' in page_content
+                    self.logger.debug(f"登录检测: current-user={has_current_user}, user-menu={has_user_menu}")
+
+                    # 检查是否有登录按钮（如果有说明未登录）
+                    has_login_button = 'login-button' in page_content or '"登录"' in page_content
+                    self.logger.debug(f"登录按钮检测: {has_login_button}")
+
+                    if has_current_user or has_user_menu:
+                        self.logger.info("✓ Cookies 登录成功")
+                        return True
+                    else:
+                        self.logger.warning("Cookies 已失效，尝试常规登录...")
+                        self.logger.debug(f"页面片段: {page_content[:500]}")  # 打印前500字符
+
+            # Cookies 失效或不存在，执行常规登录流程
+            self.logger.info("执行常规登录流程...")
             # 访问首页
             self.logger.info(f"访问首页: {self.site_url}")
             await self.page.goto(self.site_url, wait_until='domcontentloaded', timeout=self.PAGE_LOAD_TIMEOUT)

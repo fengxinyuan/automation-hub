@@ -46,3 +46,4 @@ Thumbs.db
 # 临时文件
 *.tmp
 *_test.yaml
+modules/forum/linuxdo/cookies.json
