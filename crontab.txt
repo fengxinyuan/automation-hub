@@ -1,8 +1,14 @@
 # Automation Hub - Cron Jobs Configuration
-# Updated on 2025-12-23
+# Updated on 2026-01-05
 
 # ==========================================
-# 1. Automation Hub 每日任务
+# 1. Linux.do 自动阅读（每10分钟一次）
+# ==========================================
+# 每10分钟执行一次自动阅读（脚本内带随机延迟0-5分钟）
+*/10 * * * * /root/automation-hub/run_auto_read.sh >> /root/automation-hub/storage/logs/cron.log 2>&1
+
+# ==========================================
+# 2. Automation Hub 每日任务
 # ==========================================
 # 每天北京时间 12:00 PM 执行（服务器时区：Asia/Shanghai CST +0800）
 # 包含：AnyRouter 签到 + Linux.do 论坛总结
