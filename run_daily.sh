@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 # Automation Hub - 每日自动运行脚本
-# 包含：AnyRouter 签到 + Linux.do 论坛总结
+# 包含：AnyRouter 签到
 #
 
 set -e
@@ -29,25 +29,13 @@ if [ -d "$PROJECT_ROOT/venv" ]; then
     source "$PROJECT_ROOT/venv/bin/activate"
 fi
 
-# 1. AnyRouter 签到
+# AnyRouter 签到
 echo "" | tee -a "$LOG_FILE"
-echo ">>> [1/2] 执行 AnyRouter 签到..." | tee -a "$LOG_FILE"
+echo ">>> 执行 AnyRouter 签到..." | tee -a "$LOG_FILE"
 if python3 "$PROJECT_ROOT/modules/checkin/anyrouter/run.py" >> "$LOG_FILE" 2>&1; then
     echo "✓ AnyRouter 签到完成" | tee -a "$LOG_FILE"
 else
     echo "✗ AnyRouter 签到失败" | tee -a "$LOG_FILE"
-fi
-
-# 等待一下，避免请求过快
-sleep 5
-
-# 2. Linux.do 论坛总结
-echo "" | tee -a "$LOG_FILE"
-echo ">>> [2/2] 执行 Linux.do 论坛总结..." | tee -a "$LOG_FILE"
-if python3 "$PROJECT_ROOT/modules/forum/linuxdo/run.py" >> "$LOG_FILE" 2>&1; then
-    echo "✓ Linux.do 论坛总结完成" | tee -a "$LOG_FILE"
-else
-    echo "✗ Linux.do 论坛总结失败" | tee -a "$LOG_FILE"
 fi
 
 # 完成日志
